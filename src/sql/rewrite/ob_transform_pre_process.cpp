@@ -1120,10 +1120,19 @@ int ObTransformPreProcess::transform_in_or_notin_expr_without_row(ObRawExprFacto
       ObSEArray<ObRawExpr *, 4> ne_exprs;
       for (int64_t i = 0; OB_SUCC(ret) && i < right_expr->get_param_count(); ++i) {
         ObOpRawExpr *ne_expr = NULL;
-        if (OB_FAIL(expr_factory.create_raw_expr(T_OP_NE, ne_expr))) {
+        ObRawExpr *ne_left_expr = left_expr;
+        // Same reason as create_partial_expr() above: for T_OP_ROW the implicit cast is added on
+        // the row's params rather than above the row, so one shared node would make every
+        // predicate inherit the cast that only the last one needed.  Copy the node, share params.
+        if (T_OP_ROW == left_expr->get_expr_type()
+            && OB_FAIL(ObRawExprCopier::copy_expr_node(expr_factory, left_expr, ne_left_expr))) {
+          LOG_WARN("failed to copy row expr node", K(ret));
+        } else if (OB_ISNULL(ne_left_expr)) {
+          ret = OB_ERR_UNEXPECTED;
+        } else if (OB_FAIL(expr_factory.create_raw_expr(T_OP_NE, ne_expr))) {
         } else if (OB_ISNULL(ne_expr) || OB_ISNULL(right_expr->get_param_expr(i))) {
           ret = OB_ERR_UNEXPECTED;
-        } else if (OB_FAIL(ne_expr->set_param_exprs(left_expr, right_expr->get_param_expr(i)))) {
+        } else if (OB_FAIL(ne_expr->set_param_exprs(ne_left_expr, right_expr->get_param_expr(i)))) {
         } else if (OB_FAIL(ne_expr->formalize(&session))) {
         } else if (OB_FAIL(ne_exprs.push_back(ne_expr))) {
           // do nothing
