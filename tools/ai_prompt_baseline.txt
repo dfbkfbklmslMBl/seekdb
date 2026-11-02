@@ -1,0 +1,275 @@
+### select ai_prompt('{0}+{1}={2} 吗？请回答true或false','1')
+ai_prompt('{0}+{1}={2} 吗？请回答true或false','1')
+{"args": ["1"], "template": "{0}+{1}={2} 吗？请回答true或false"}
+(1 行)
+### select ai_prompt('{0}+{1}={2} 吗？请回答true或false',json_object("a","1"))
+!!! 非预期错误 1235: (1235, 'json type is not supported not supported')
+### select ai_prompt('{0}/{0}/{1}', json_array(1,true), json_object("k",2))
+!!! 非预期错误 1235: (1235, 'json type is not supported not supported')
+### select ai_prompt()
+1582: (1582, "Incorrect parameter count in the call to native function 'ai_prompt'")
+--- ok（error [1582] 如预期）
+### select ai_prompt(1)
+5083: (5083, 'Invalid data type for the operation')
+--- ok（error [5083] 如预期）
+### select ai_prompt(1.2)
+5083: (5083, 'Invalid data type for the operation')
+--- ok（error [5083] 如预期）
+### select ai_prompt(json_object("a","1"))
+5083: (5083, 'Invalid data type for the operation')
+--- ok（error [5083] 如预期）
+### select ai_prompt('{0}+{1}={2} 吗？请回答true或false',1)
+5083: (5083, 'Invalid data type for the operation')
+--- ok（error [5083] 如预期）
+### drop table if exists t1
+### create table t1 (nr char(5), a varchar(10), b BINARY(20), c VARBINARY(20))
+### insert into t1 values( 'a', 'b', "oExGTLHmkvIGQekFkd" , "oExGTLHmkvIGQekFkd")
+### insert into t1 values('aa', 'bb', 'oExGTLHmkvIGQekFkd', 'lmtBeletLiSQIwqhwr')
+### insert into t1 values('aaa', 'bbb', 'RioBRrIKsEiedMVmtUqq', 'eIKamHGwnY')
+### select ai_prompt(nr) from t1
+ai_prompt(nr)
+{"args": [], "template": "a"}
+{"args": [], "template": "aa"}
+{"args": [], "template": "aaa"}
+(3 行)
+### select ai_prompt(a) from t1
+ai_prompt(a)
+{"args": [], "template": "b"}
+{"args": [], "template": "bb"}
+{"args": [], "template": "bbb"}
+(3 行)
+### select ai_prompt(b) from t1
+ai_prompt(b)
+{"args": [], "template": "oExGTLHmkvIGQekFkd\u0000\u0000"}
+{"args": [], "template": "oExGTLHmkvIGQekFkd\u0000\u0000"}
+{"args": [], "template": "RioBRrIKsEiedMVmtUqq"}
+(3 行)
+### select ai_prompt(c) from t1
+ai_prompt(c)
+{"args": [], "template": "oExGTLHmkvIGQekFkd"}
+{"args": [], "template": "lmtBeletLiSQIwqhwr"}
+{"args": [], "template": "eIKamHGwnY"}
+(3 行)
+### drop table t1
+### drop table if exists t1
+### create table t1 (nr int, a tinyblob, b text, c mediumblob, d longtext)
+### insert into t1 values(1, 'a', 'b', 'c', 'd')
+### insert into t1 values(2, 'aa', 'bb', 'cc', 'dd')
+### insert into t1 values(3, 'aaa', 'bbb', 'ccc', 'ddd')
+### insert into t1 values(6, 'aaa', 'BBB', 'ccc', 'DDD')
+### insert into t1 values(7, 'AA', 'bb', 'CC', 'dd')
+### select ai_prompt(nr) from t1
+5083: (5083, 'Invalid data type for the operation')
+--- ok（error [5083] 如预期）
+### select ai_prompt(a) from t1
+!!! 非预期错误 5083: (5083, 'Invalid data type for the operation')
+### select ai_prompt(b) from t1
+!!! 非预期错误 5083: (5083, 'Invalid data type for the operation')
+### select ai_prompt(c) from t1
+!!! 非预期错误 5083: (5083, 'Invalid data type for the operation')
+### select ai_prompt(d) from t1
+!!! 非预期错误 5083: (5083, 'Invalid data type for the operation')
+### drop table t1
+### drop table if exists t1
+### create table t1 (nr char(5), a varchar(10), b BINARY(20), c VARBINARY(20))
+### insert into t1 values( 'a', 'b', "oExGTLHmkvIGQekFkd" , "oExGTLHmkvIGQekFkd")
+### insert into t1 values('aa', 'bb', 'oExGTLHmkvIGQekFkd', 'lmtBeletLiSQIwqhwr')
+### insert into t1 values('aaa', 'bbb', 'RioBRrIKsEiedMVmtUqq', 'eIKamHGwnY')
+### select ai_prompt(nr) from t1
+ai_prompt(nr)
+{"args": [], "template": "a"}
+{"args": [], "template": "aa"}
+{"args": [], "template": "aaa"}
+(3 行)
+### select ai_prompt(nr,a) from t1
+ai_prompt(nr,a)
+{"args": ["b"], "template": "a"}
+{"args": ["bb"], "template": "aa"}
+{"args": ["bbb"], "template": "aaa"}
+(3 行)
+### select ai_prompt(nr,a,b) from t1
+ai_prompt(nr,a,b)
+{"args": ["b", "oExGTLHmkvIGQekFkd\u0000\u0000"], "template": "a"}
+{"args": ["bb", "oExGTLHmkvIGQekFkd\u0000\u0000"], "template": "aa"}
+{"args": ["bbb", "RioBRrIKsEiedMVmtUqq"], "template": "aaa"}
+(3 行)
+### select ai_prompt(nr,a,b,c) from t1
+ai_prompt(nr,a,b,c)
+{"args": ["b", "oExGTLHmkvIGQekFkd\u0000\u0000", "oExGTLHmkvIGQekFkd"], "template": "a"}
+{"args": ["bb", "oExGTLHmkvIGQekFkd\u0000\u0000", "lmtBeletLiSQIwqhwr"], "template": "aa"}
+{"args": ["bbb", "RioBRrIKsEiedMVmtUqq", "eIKamHGwnY"], "template": "aaa"}
+(3 行)
+### drop table t1
+### drop table if exists t1
+### create table t1 (nr int primary key, a1 tinyblob, a2 text, a3 mediumblob, a4 longtext)
+### insert into t1 values(1, 'aa', 'bb', 'cc', 'dd')
+### insert into t1 values(2, 'AA', 'BB', 'CC', 'DD')
+### insert into t1 values(3, 'aaa', '世界', 'ccc', '和平')
+### select ai_prompt(cast(a1 AS datetime)) from t1 order by nr asc
+5083: (5083, 'Invalid data type for the operation')
+--- ok（error [5083] 如预期）
+### select ai_prompt(cast(a1 AS char(2)),cast(a1 AS datetime)) from t1 order by nr asc
+5083: (5083, 'Invalid data type for the operation')
+--- ok（error [5083] 如预期）
+### select ai_prompt(cast(a1 AS decimal(9,2))) from t1 order by nr asc
+5083: (5083, 'Invalid data type for the operation')
+--- ok（error [5083] 如预期）
+### select ai_prompt(cast(a1 AS char(2)),cast(a1 AS decimal(9,2))) from t1 order by nr asc
+5083: (5083, 'Invalid data type for the operation')
+--- ok（error [5083] 如预期）
+### select ai_prompt(cast(a1 AS decimal(9))) from t1 order by nr asc
+5083: (5083, 'Invalid data type for the operation')
+--- ok（error [5083] 如预期）
+### select ai_prompt(cast(a1 AS char(2)),cast(a1 AS decimal(9))) from t1 order by nr asc
+5083: (5083, 'Invalid data type for the operation')
+--- ok（error [5083] 如预期）
+### select ai_prompt(cast(a1 AS date)) from t1 order by nr asc
+5083: (5083, 'Invalid data type for the operation')
+--- ok（error [5083] 如预期）
+### select ai_prompt(cast(a1 AS char(2)),cast(a1 AS date)) from t1 order by nr asc
+5083: (5083, 'Invalid data type for the operation')
+--- ok（error [5083] 如预期）
+### select ai_prompt(cast(a1 AS signed integer)) from t1 order by nr asc
+5083: (5083, 'Invalid data type for the operation')
+--- ok（error [5083] 如预期）
+### select ai_prompt(cast(a1 AS char(2)),cast(a1 AS signed integer)) from t1 order by nr asc
+5083: (5083, 'Invalid data type for the operation')
+--- ok（error [5083] 如预期）
+### select ai_prompt(cast(a1 AS unsigned)) from t1 order by nr asc
+5083: (5083, 'Invalid data type for the operation')
+--- ok（error [5083] 如预期）
+### select ai_prompt(cast(a1 AS char(2)),cast(a1 AS unsigned)) from t1 order by nr asc
+5083: (5083, 'Invalid data type for the operation')
+--- ok（error [5083] 如预期）
+### select ai_prompt(cast(a1 AS time)) from t1 order by nr asc
+5083: (5083, 'Invalid data type for the operation')
+--- ok（error [5083] 如预期）
+### select ai_prompt(cast(a1 AS char(2)),cast(a1 AS time)) from t1 order by nr asc
+5083: (5083, 'Invalid data type for the operation')
+--- ok（error [5083] 如预期）
+### select ai_prompt(cast(a1 AS signed)) from t1 order by nr asc
+5083: (5083, 'Invalid data type for the operation')
+--- ok（error [5083] 如预期）
+### select ai_prompt(cast(a1 AS char(2)),cast(a1 AS signed)) from t1 order by nr asc
+5083: (5083, 'Invalid data type for the operation')
+--- ok（error [5083] 如预期）
+### select ai_prompt(cast(a1 AS binary)) from t1 order by nr asc
+ai_prompt(cast(a1 AS binary))
+{"args": [], "template": "aa"}
+{"args": [], "template": "AA"}
+{"args": [], "template": "aaa"}
+(3 行)
+### select ai_prompt(cast(a1 AS binary),cast(a1 AS binary)) from t1 order by nr asc
+ai_prompt(cast(a1 AS binary),cast(a1 AS binary))
+{"args": ["aa"], "template": "aa"}
+{"args": ["AA"], "template": "AA"}
+{"args": ["aaa"], "template": "aaa"}
+(3 行)
+### select ai_prompt(cast(a1 AS char)) from t1 order by nr asc
+ai_prompt(cast(a1 AS char))
+{"args": [], "template": "aa"}
+{"args": [], "template": "AA"}
+{"args": [], "template": "aaa"}
+(3 行)
+### select ai_prompt(cast(a1 AS char(2))) from t1 order by nr asc
+ai_prompt(cast(a1 AS char(2)))
+{"args": [], "template": "aa"}
+{"args": [], "template": "AA"}
+{"args": [], "template": "aa"}
+(3 行)
+### drop table t1
+### select ai_prompt(null)
+5083: (5083, 'Invalid data type for the operation')
+--- ok（error [5083] 如预期）
+### select ai_prompt('a',null)
+5083: (5083, 'Invalid data type for the operation')
+--- ok（error [5083] 如预期）
+### select ai_prompt('')
+1210: (1210, 'Invalid argument')
+--- ok（error [1210] 如预期）
+### select ai_prompt('1+1=?','')
+ai_prompt('1+1=?','')
+{"args": [""], "template": "1+1=?"}
+(1 行)
+### select ai_prompt('1+1=?{0}','')
+ai_prompt('1+1=?{0}','')
+{"args": [""], "template": "1+1=?{0}"}
+(1 行)
+### select ai_prompt('\0')
+ai_prompt('\0')
+{"args": [], "template": "\u0000"}
+(1 行)
+### drop table if exists t1
+### create table t1 (nr int, a varchar(10), b BINARY(20), d int)
+### insert into t1 values( 1, 'b', "oExGTLHmkvIGQekFkd" , 10)
+### insert into t1 values( 2, 'bbb', 'RioBRrIKsEiedMVmtUqq', 20)
+### insert into t1 values( 1, 'bb', 'oExGTLHmkvIGQekFkd', 30)
+### select ai_prompt(a,b) from t1 order by nr
+ai_prompt(a,b)
+{"args": ["oExGTLHmkvIGQekFkd\u0000\u0000"], "template": "b"}
+{"args": ["oExGTLHmkvIGQekFkd\u0000\u0000"], "template": "bb"}
+{"args": ["RioBRrIKsEiedMVmtUqq"], "template": "bbb"}
+(3 行)
+### select ai_prompt(a,b),sum(d) from t1 group by nr
+ai_prompt(a,b)	sum(d)
+{"args": ["oExGTLHmkvIGQekFkd\u0000\u0000"], "template": "b"}	40
+{"args": ["RioBRrIKsEiedMVmtUqq"], "template": "bbb"}	20
+(2 行)
+### select ai_prompt(a,b),sum(d) from t1 group by nr having nr>1
+ai_prompt(a,b)	sum(d)
+{"args": ["RioBRrIKsEiedMVmtUqq"], "template": "bbb"}	20
+(1 行)
+### select ai_prompt(w.a, w.b), b from t1 as w
+ai_prompt(w.a, w.b)	b
+{"args": ["oExGTLHmkvIGQekFkd\u0000\u0000"], "template": "b"}	b'oExGTLHmkvIGQekFkd\x00\x00'
+{"args": ["RioBRrIKsEiedMVmtUqq"], "template": "bbb"}	b'RioBRrIKsEiedMVmtUqq'
+{"args": ["oExGTLHmkvIGQekFkd\u0000\u0000"], "template": "bb"}	b'oExGTLHmkvIGQekFkd\x00\x00'
+(3 行)
+### select cast(ai_prompt(w.a, w.b) as char), b from t1 as w
+cast(ai_prompt(w.a, w.b) as char)	b
+{"args": ["oExGTLHmkvIGQekFkd\u0000\u0000"], "template": "b"}	b'oExGTLHmkvIGQekFkd\x00\x00'
+{"args": ["RioBRrIKsEiedMVmtUqq"], "template": "bbb"}	b'RioBRrIKsEiedMVmtUqq'
+{"args": ["oExGTLHmkvIGQekFkd\u0000\u0000"], "template": "bb"}	b'oExGTLHmkvIGQekFkd\x00\x00'
+(3 行)
+### select ai_prompt(a,b) from t1 where d>10
+ai_prompt(a,b)
+{"args": ["RioBRrIKsEiedMVmtUqq"], "template": "bbb"}
+{"args": ["oExGTLHmkvIGQekFkd\u0000\u0000"], "template": "bb"}
+(2 行)
+### select ai_prompt(a,b) from t1 where d=10
+ai_prompt(a,b)
+{"args": ["oExGTLHmkvIGQekFkd\u0000\u0000"], "template": "b"}
+(1 行)
+### select ai_prompt(a,b) from t1 where d<10
+ai_prompt(a,b)
+(0 行)
+### select /*+ ENABLE_PARALLEL_DML parallel(256) */ ai_prompt(a,b) from t1 order by nr
+ai_prompt(a,b)
+{"args": ["oExGTLHmkvIGQekFkd\u0000\u0000"], "template": "b"}
+{"args": ["oExGTLHmkvIGQekFkd\u0000\u0000"], "template": "bb"}
+{"args": ["RioBRrIKsEiedMVmtUqq"], "template": "bbb"}
+(3 行)
+### drop table t1
+### drop table if exists t1
+### drop table if exists t2
+### create table t1 (nr int, a varchar(10), b BINARY(20), d int)
+### insert into t1 values( 1, 'b', "oExGTLHmkvIGQekFkd" , 10)
+### insert into t1 values( 2, 'bbb', 'RioBRrIKsEiedMVmtUqq', 20)
+### insert into t1 values( 1, 'bb', 'oExGTLHmkvIGQekFkd', 30)
+### create table t2 (nr int, a varchar(10), b BINARY(20), d int)
+### insert into t2 values( 3, 'b', "oExGTLHmkvIGQekFkd" , 10)
+### insert into t2 values( 2, 'bbb', 'RioBRrIKsEiedMVmtUqq', 20)
+### insert into t2 values( 1, 'bb', 'oExGTLHmkvIGQekFkd', 30)
+### select ai_prompt(t1.a) from t1 INNER JOIN t2 on t1.nr = t2.nr
+ai_prompt(t1.a)
+{"args": [], "template": "b"}
+{"args": [], "template": "bbb"}
+{"args": [], "template": "bb"}
+(3 行)
+### WITH t3 AS (     SELECT ai_prompt(t1.a) AS result     FROM t1     INNER JOIN t2 ON t1.nr = t2.nr ) SELECT * FROM t3
+result
+{"args": [], "template": "b"}
+{"args": [], "template": "bbb"}
+{"args": [], "template": "bb"}
+(3 行)
+### drop table t1

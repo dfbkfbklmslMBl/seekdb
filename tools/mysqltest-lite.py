@@ -122,6 +122,9 @@ class Runner:
                         suppress_rows = False
                     elif name in ("disable_query_log", "enable_query_log"):
                         pass  # 只影响 .result 里是否抄录 SQL，本脚本自己总是抄
+                    elif name in ("disable_warnings", "enable_warnings", "biff"):
+                        # 这些只影响 SHOW WARNINGS 噪声，不承载断言 ⇒ 忽略它们不会漏掉任何验证
+                        pass
                     elif name == "source":
                         target = self.resolve_source(rest)
                         if target:
@@ -186,6 +189,7 @@ def main():
     parser.add_argument("--test", required=True)
     parser.add_argument("--repo-root", default=None)
     parser.add_argument("--var", action="append", default=[], help="NAME=VALUE，可重复")
+    parser.add_argument("--db", default="test", help="mysqltest 默认连的就是 test 库；不设会满屏 1046")
     parser.add_argument("--out", default=None)
     args = parser.parse_args()
 
@@ -200,8 +204,8 @@ def main():
         name, _, value = item.partition("=")
         variables[name.lstrip("$")] = value
 
-    conn = pymysql.connect(host=args.host, port=args.port, user=args.user, autocommit=True,
-                           charset="utf8mb4")
+    conn = pymysql.connect(host=args.host, port=args.port, user=args.user, db=args.db,
+                           autocommit=True, charset="utf8mb4")
     cur = conn.cursor()
     cur.execute("SET ob_query_timeout = 100000000000")
     out = []

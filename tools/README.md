@@ -34,3 +34,14 @@
 
 `file_sql_basic.actual-unpatched.txt` 是**未打补丁**的 1.4.0 上跑出来的现状转录（3 条断言、21 处不符、
 10 条客户端指令不支持），判分口径见台账 §26。
+
+## tools/mock_ai_service.py —— 独立版 Mock AI 服务（判分环境的硬前置）
+`t/ai_function_enhancement.test` 把 endpoint 全写死成 `http://0.0.0.0:8000/...`（openai 的
+chat/completions 与 embeddings、siliconflow 的 v1/rerank、ollama 的 /api/generate 与 /api/embed），
+`access_key` 是 `mock-key` 或空串。**⇒ 8000 上没有服务时，实现写得再对也全红。**
+云上跑分之前先：`python mock_ai_service.py --port 8000 --dim 768 &`
+自检：`curl -s -X POST localhost:8000/compatible-mode/v1/embeddings -d '{}' | head -c 120`
+
+## tools/ai_prompt_baseline.txt —— ai_prompt.test 在**未打补丁 1.4.0** 上的基线
+25 条 `--error` 断言、**6 条已经红**。补丁打上之后必须**至少不比这里差**（回归下限）。
+`connection default;` 是本脚本有意不执行的 mysqltest 客户端指令。
