@@ -1,0 +1,88 @@
+/root/rivermind-data/ktools/mysqltest-oracle.py:268: DeprecationWarning: 'db' is deprecated, use 'database'
+  raise SystemExit(main())
+[ORACLE] test=ai_function_enhancement.test expected_lines=101 actual_lines=107 matched=82 strict=0 indent_only=0 stmts=52 sql_errors=22 unsure=12
+--- expected
++++ actual
+@@ -1,4 +1,4 @@
+ select ai_prompt('{0}/{0}/{1}', json_array(1,true), json_object('k',2));
+-ai_prompt('{0}/{0}/{1}', json_array(1,true), json_object('k',2))
+-{"args": [[1, true], {"k": 2}], "template": "{0}/{0}/{1}"}
++ERROR 0A000: json type is not supported not supported
++[UNSURE] UNEXPECTED error 1235 not in []
+ drop table if exists ai_enhance_prompt;
+@@ -7,4 +7,4 @@
+ select ai_prompt(t, a) from ai_enhance_prompt;
+-ai_prompt(t, a)
+-{"args": ["lob"], "template": "{0}-ok"}
++ERROR 22000: Invalid data type for the operation
++[UNSURE] UNEXPECTED error 5083 not in []
+ drop table ai_enhance_prompt;
+@@ -17,4 +17,4 @@
+ select length(ai_complete('enhance_complete', 'hello', null)) > 0 as complete_ok;
+-complete_ok
+-1
++ERROR 22032: Invalid JSON text in argument.
++[UNSURE] UNEXPECTED error 3141 not in []
+ select length(ai_complete(
+@@ -22,4 +22,4 @@
+ '{"temperature":0.2,"max_tokens":16}')) > 0 as complete_config_ok;
+-complete_config_ok
+-1
++ERROR 0A000: json type is not supported not supported
++[UNSURE] UNEXPECTED error 1235 not in []
+ call DBMS_AI_SERVICE.DROP_AI_MODEL('enhance_embed');
+@@ -41,6 +41,4 @@
+ from ai_enhance_batch order by id;
+-id	dimension
+-1	768
+-2	NULL
+-3	768
++ERROR HY000: Incorrect arguments to ai_embed, model id or content is null
++[UNSURE] UNEXPECTED error 1210 not in []
+ drop table ai_enhance_batch;
+@@ -54,4 +52,4 @@
+ '["apple","banana","fruit","vegetable"]', null)) as rerank_count;
+-rerank_count
+-4
++ERROR HY000: Incorrect arguments to ai_rerank, document_array element is not object
++[UNSURE] UNEXPECTED error 1210 not in []
+ select json_unquote(json_extract(r, '$[0].id')) as first_id,
+@@ -69,2 +67,4 @@
+ 'enhance_ollama_complete_ep', '{"ai_model_name":"enhance_ollama_complete","scope":"all","url":"http://0.0.0.0:8000/api/generate","access_key":"","provider":"ollama"}');
++ERROR HY000: The param 'access_key' is empty or null
++[UNSURE] UNEXPECTED error 11114 not in []
+ select provider from oceanbase.DBA_OB_AI_MODEL_ENDPOINTS
+@@ -72,5 +72,6 @@
+ provider
+-ollama
+ call DBMS_AI_SERVICE.ALTER_AI_MODEL_ENDPOINT(
+ 'enhance_ollama_complete_ep', '{"provider":"Ollama"}');
++ERROR HY000: This AI model endpoint 'enhance_ollama_complete_ep' was not found
++[UNSURE] UNEXPECTED error 11112 not in []
+ select provider from oceanbase.DBA_OB_AI_MODEL_ENDPOINTS
+@@ -78,6 +79,5 @@
+ provider
+-Ollama
+ select length(ai_complete('enhance_ollama_complete', 'hello')) > 0 as ollama_complete_ok;
+-ollama_complete_ok
+-1
++ERROR HY000: This AI model endpoint is not found
++[UNSURE] UNEXPECTED error 11112 not in []
+ call DBMS_AI_SERVICE.DROP_AI_MODEL('enhance_ollama_embed');
+@@ -88,5 +88,7 @@
+ 'enhance_ollama_embed_ep', '{"ai_model_name":"enhance_ollama_embed","scope":"all","url":"http://0.0.0.0:8000/api/embed","access_key":"","provider":"OLLAMA"}');
++ERROR HY000: The param 'access_key' is empty or null
++[UNSURE] UNEXPECTED error 11114 not in []
+ select json_valid(ai_embed('enhance_ollama_embed', 'hello')) as ollama_embed_ok;
+ ollama_embed_ok
+-1
++0
+ call DBMS_AI_SERVICE.DROP_AI_MODEL('enhance_complete');
+@@ -99,3 +101,7 @@
+ call DBMS_AI_SERVICE.DROP_AI_MODEL_ENDPOINT('enhance_ollama_complete_ep');
++ERROR HY000: This AI model endpoint 'enhance_ollama_complete_ep' was not found
++[UNSURE] UNEXPECTED error 11112 not in []
+ call DBMS_AI_SERVICE.DROP_AI_MODEL('enhance_ollama_embed');
+ call DBMS_AI_SERVICE.DROP_AI_MODEL_ENDPOINT('enhance_ollama_embed_ep');
++ERROR HY000: This AI model endpoint 'enhance_ollama_embed_ep' was not found
++[UNSURE] UNEXPECTED error 11112 not in []

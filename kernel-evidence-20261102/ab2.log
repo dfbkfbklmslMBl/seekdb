@@ -1,0 +1,31 @@
+===== stage 1: revert the 7 AI files
+make rc=0
+boot rc=0
+[AB before] binary_md5=d75e522c7499ff4971412fba36c43a8c dirty_files=7 listener=pid=23434
+[AB before] DISCRIMINATOR empty_access_key_for_ollama = REJECTED (11114, "The param 'access_key' is empty or null")
+[AB before] [ORACLE] test=ai_function_enhancement.test expected_lines=101 actual_lines=107 matched=82 strict=0 indent_only=0 stmts=52 sql_errors=22 unsure=12
+[AB before] [ORACLE] test=ai_prompt.test expected_lines=250 actual_lines=234 matched=222 strict=0 indent_only=0 stmts=101 sql_errors=31 unsure=6
+===== stage 2: re-apply the 6 AI patches
+make rc=0
+boot rc=0
+[AB after] binary_md5=33d691189fb3930e0e95abe60f23b6dd dirty_files=14 listener=pid=24220
+[AB after] DISCRIMINATOR empty_access_key_for_ollama = ACCEPTED
+[AB after] [ORACLE] test=ai_function_enhancement.test expected_lines=101 actual_lines=101 matched=101 strict=1 indent_only=0 stmts=52 sql_errors=10 unsure=0
+[AB after] [ORACLE] test=ai_prompt.test expected_lines=250 actual_lines=250 matched=250 strict=1 indent_only=0 stmts=101 sql_errors=25 unsure=0
+===== stage 3: revert the FTS files so the tree equals the pushed branch
+make rc=0
+boot rc=0
+[AB submitted] binary_md5=b625d446cf7d3554d71b56bb2fde34ed dirty_files=8 listener=pid=25014
+[AB submitted] DISCRIMINATOR empty_access_key_for_ollama = ACCEPTED
+[AB submitted] [ORACLE] test=ai_function_enhancement.test expected_lines=101 actual_lines=101 matched=101 strict=1 indent_only=0 stmts=52 sql_errors=10 unsure=0
+[AB submitted] [ORACLE] test=ai_prompt.test expected_lines=250 actual_lines=250 matched=250 strict=1 indent_only=0 stmts=101 sql_errors=25 unsure=0
+final dirty files: 8
+src/observer/ai_service/ob_ai_service_proxy.cpp
+src/observer/composition/retrieval/ob_das_legacy_tr_merge_iter.cpp
+src/share/ai_service/ob_ai_service_struct.cpp
+src/sql/engine/expr/ob_expr_ai/ob_ai_func_utils.cpp
+src/sql/engine/expr/ob_expr_ai/ob_expr_ai_complete.cpp
+src/sql/engine/expr/ob_expr_ai/ob_expr_ai_embed.cpp
+src/sql/engine/expr/ob_expr_ai/ob_expr_ai_prompt.cpp
+src/sql/engine/expr/ob_expr_ai/ob_expr_ai_rerank.cpp
+AB_DONE

@@ -1,0 +1,40 @@
+赛题四 全文索引调优 - measured null result (2026-11-02, 256-core Ubuntu 22.04 box, self-built
+origin/2026-competition @ 5bce9e06d, official harness tools/benchmark/fts_large_bench.sh with the
+baseline parameters ROWS=20000 BATCH=500 ROUNDS=3000 QUERY_ROUNDS=200 SAMPLES=3 WARMUP=30 SKIP_LOAD=0)
+
+  metric                     before    after(01-04)   delta
+  build_ik_all_sec            6.498      6.833        -5.2%  (worse)
+  build_ik_content_sec        5.476      5.282        +3.5%
+  build_beng_en_sec           2.765      2.871        -3.8%  (worse)
+  build_total_sec            14.769     15.017        -1.7%  (worse)
+  tokenize_ik_avg_ms         0.3047     0.3134        -2.9%  (worse)
+  tokenize_beng_avg_ms       0.1914     0.1988        -3.9%  (worse)
+  query_cn_avg_ms            3.2531     3.1881        +2.0%
+  query_beng_avg_ms          4.7392     4.7317        +0.2%
+  query_mixed_avg_ms         3.5183     3.5069        +0.3%
+  query_limit_avg_ms         3.6324     3.6775        -1.2%  (worse)
+
+Hit counts identical to the official baseline on both runs (query_cn 8001 / query_beng 11000 /
+query_mixed 7332 / query_limit 20), so both runs measured the same workload - the deltas are
+run-to-run noise, and 5 of 9 are negative. Under the published rule
+  score = clamp(mean over the 3 equal-weight categories, 0, 0.5) / 0.5 * 100
+with per-metric negatives NOT clamped, submitting 01-04 as-is can only lose points. => reverted,
+not submitted.
+
+The box is ~4-5x faster than the CI baseline machine (build_total 14.8 s vs 78.4 s, tokenize_ik
+0.30 ms vs 0.77 ms, query_cn 3.25 ms vs 16.66 ms), so absolute numbers are not comparable to the
+baseline json, but the RATIO is what a patch must improve and the ratio here is ~0.
+
+Two premises falsified by measurement, do not re-attempt them without new evidence:
+  * F1 (cache the IK parser / stop re-pinning dict ranges per document): patch 03 deleted one of
+    the three per-document dict setups outright and tokenize_ik did not move (0.3047 -> 0.3134).
+    If a whole dict setup is free, the rest of F1 is not where the time is.
+  * tokenizer-dominated build: not established. What IS established is that no profile exists for
+    the build path on this box: perf is not installed, and gdb sampling costs 10-25 s per sample on
+    a 1.3 GB binary with 167 threads, so a 20-sample profile needs ~8 minutes of a running build.
+    select1_avg_ms = 0.1197 ms is 39% of tokenize_ik's 0.3047 ms, so the tokenize category has at
+    most ~60% headroom even if the tokenizer became free.
+
+Correctness side-note found while reading (unrelated to perf, still unfixed in the tree):
+ObDictCacheKey::operator== (src/storage/fts/dict/ob_ft_cache.h) ignores range_id_ while hash()
+includes it, so a KV-cache bucket collision can hand back the wrong dictionary range.

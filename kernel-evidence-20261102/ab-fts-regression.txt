@@ -1,0 +1,16 @@
+rc=1 [ORACLE] test=basic_dml_sequel.test expected_lines=537 actual_lines=488 matched=339 strict=0 indent_only=0 stmts=162 sql_errors=20 unsure=21
+rc=1 [ORACLE] test=basic_dml.test expected_lines=4060 actual_lines=1824 matched=834 strict=0 indent_only=0 stmts=546 sql_errors=243 unsure=265
+rc=1 [ORACLE] test=cn_word.test expected_lines=132 actual_lines=132 matched=130 strict=0 indent_only=0 stmts=43 sql_errors=3 unsure=2
+rc=1 [ORACLE] test=create_fts_index_afterward.test expected_lines=345 actual_lines=355 matched=187 strict=0 indent_only=0 stmts=114 sql_errors=50 unsure=51
+rc=1 [ORACLE] test=create_table_with_fts_index.test expected_lines=272 actual_lines=270 matched=170 strict=0 indent_only=0 stmts=59 sql_errors=29 unsure=28
+rc=1 [ORACLE] test=domain_id_merge_with_compare_null.test expected_lines=30 actual_lines=30 matched=28 strict=0 indent_only=0 stmts=18 sql_errors=0 unsure=0
+rc=1 [ORACLE] test=drop_index.test expected_lines=602 actual_lines=327 matched=99 strict=0 indent_only=0 stmts=108 sql_errors=75 unsure=77
+rc=1 [ORACLE] test=index_view.test expected_lines=130 actual_lines=118 matched=32 strict=0 indent_only=0 stmts=12 sql_errors=0 unsure=4
+rc=1 [ORACLE] test=load_data.test expected_lines=44 actual_lines=36 matched=24 strict=0 indent_only=0 stmts=12 sql_errors=0 unsure=2
+rc=1 [ORACLE] test=offline_ddl_with_fts_index.test expected_lines=202 actual_lines=204 matched=202 strict=0 indent_only=0 stmts=89 sql_errors=4 unsure=2
+rc=1 [ORACLE] test=online_ddl_on_table_with_fts_index.test expected_lines=448 actual_lines=365 matched=199 strict=0 indent_only=0 stmts=87 sql_errors=3 unsure=7
+rc=1 [ORACLE] test=parser_properties.test expected_lines=179 actual_lines=153 matched=123 strict=0 indent_only=0 stmts=58 sql_errors=22 unsure=4
+rc=1 [ORACLE] test=partitioned_simple_query.test expected_lines=1209 actual_lines=1035 matched=837 strict=0 indent_only=0 stmts=81 sql_errors=2 unsure=5
+rc=1 [ORACLE] test=simple_query.test expected_lines=2833 actual_lines=1625 matched=1179 strict=0 indent_only=0 stmts=214 sql_errors=35 unsure=35
+rc=1 [ORACLE] test=tokenize_function.test expected_lines=213 actual_lines=147 matched=78 strict=0 indent_only=0 stmts=56 sql_errors=22 unsure=23
+SUITE_DONE

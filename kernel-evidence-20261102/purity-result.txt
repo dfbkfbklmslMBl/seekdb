@@ -1,0 +1,36 @@
+Purity pass on the build box (2026-11-02 12:41 Asia/Shanghai), host jupyter-kehkkpddrv5k8mhe (256 cores).
+
+Goal: prove the binary that produced the "graded suites match r/mysql/*.result line for line"
+claim is built from exactly the code that was pushed as
+dfbkfbklmslMBl/seekdb:2026-competition-ai-fn @ 56bafddf8a66c704793096bf9c89a235cff3bd82.
+
+Tree state after reverting the four FTS patches (they are NOT part of the AI submission and are
+not being submitted - see fts-null-result.txt):
+
+  $ git diff --name-only | wc -l
+  7
+
+Per-file blob comparison against the pushed branch's blobs:
+
+  [PURE] MATCH src/observer/ai_service/ob_ai_service_proxy.cpp
+  [PURE] MATCH src/share/ai_service/ob_ai_service_struct.cpp
+  [PURE] MATCH src/sql/engine/expr/ob_expr_ai/ob_ai_func_utils.cpp
+  [PURE] MATCH src/sql/engine/expr/ob_expr_ai/ob_expr_ai_complete.cpp
+  [PURE] MATCH src/sql/engine/expr/ob_expr_ai/ob_expr_ai_embed.cpp
+  [PURE] MATCH src/sql/engine/expr/ob_expr_ai/ob_expr_ai_prompt.cpp
+  [PURE] MATCH src/sql/engine/expr/ob_expr_ai/ob_expr_ai_rerank.cpp
+  [PURE] modified=7 mismatched=0 expected_set=7
+
+Build / boot / measure:
+
+  [PURE] make rc=0                     (incremental, ./build.sh release --make -j256, 36 s)
+  [PURE] boot rc=0                     (listener pid on 2881 asserted == newly launched pid)
+  [PURE] binary_md5=1cf94a3ae1342dbe7434bfc47f14bd65
+  [PURE] [ORACLE] test=ai_function_enhancement.test expected_lines=101 actual_lines=101
+         matched=101 strict=1 indent_only=0 stmts=52 sql_errors=10 unsure=0
+  [PURE] [ORACLE] test=ai_prompt.test expected_lines=250 actual_lines=250
+         matched=250 strict=1 indent_only=0 stmts=101 sql_errors=25 unsure=0
+
+The two sql_errors counts are the tolerated/expected errors the suites declare with --error
+(10 x "0,11118|0,11112" defensive DROPs; 25 x --error 5083/1582/1210 in ai_prompt) and every one
+of them matched its recorded ERROR line, hence strict=1 with unsure=0.

@@ -1,0 +1,3 @@
+/root/rivermind-data/ktools/mysqltest-oracle.py:268: DeprecationWarning: 'db' is deprecated, use 'database'
+  raise SystemExit(main())
+[ORACLE] test=ai_prompt.test expected_lines=250 actual_lines=250 matched=250 strict=1 indent_only=0 stmts=101 sql_errors=25 unsure=0
