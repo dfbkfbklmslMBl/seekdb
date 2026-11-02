@@ -46,18 +46,6 @@ chat/completions 与 embeddings、siliconflow 的 v1/rerank、ollama 的 /api/ge
 25 条 `--error` 断言、**6 条已经红**。补丁打上之后必须**至少不比这里差**（回归下限）。
 `connection default;` 是本脚本有意不执行的 mysqltest 客户端指令。
 
-## tools/ai_enhancement_baseline.txt —— 官方 ai_function_enhancement.test 在**未打补丁 1.4.0** 上的实测
-跑法（配套 mock 必须先起）：
-
--  是官方 .test 的**副本**，唯一改动是把 8 处
-  `http://0.0.0.0:8000` 换成 `http://127.0.0.1:8000`（这台 Windows 的引擎连不上 0.0.0.0）。
-  **仓库里的官方文件没有被改动过**，判分时请用原文件 + 能听 0.0.0.0 的环境。
-- 实测：**非预期错误 12 条**，错误码集合 `11112 11114 1210 1235 3141 5083 `。
-  其中 `11112` 那几条是**级联**（ollama endpoint 因 11114 空 access_key 建不出来，后面的
-  DROP/使用全跟着红），不是独立缺口。
-- 修掉的一个假红来源：mysqltest 的 `--error 0, 11118` 里 **0 表示允许成功**，
-  runner 原先把成功算成失败，会让 DROP-if-exists 类语句全变红。已修。
-
 ## tools/ai_enhancement_baseline.txt —— 官方 ai_function_enhancement.test 在未打补丁 1.4.0 上的实测
 跑法（mock 必须先起来）：
 
