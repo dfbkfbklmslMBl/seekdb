@@ -22,3 +22,15 @@
    建议两种都试，别把连不上误判成实现缺失。
 2. 对象数组 + doc_key 那条断言里我的 `run()` 默认只取第一列，所以它会把「实际其实对」显示成 DIFF
    （`first_id` 拿到 'a' 就够了；第二列没取）。云上要看整行，别据此判定 rerank 有缺陷。
+
+## tools/mysqltest-lite.py —— 不用 mysqltest / 不用 mysql 客户端跑官方 `.test`
+只依赖 pymysql。支持 `--source`、`let $V=…`（含嵌套变量）、`eval`、`--error N`、`--echo`、
+`--disable/enable_result_log`、`--disable/enable_query_log`。**逐条断言 `--error` 期望**，
+并把所有结果集打成可与人肉 `.result` 对照的转录（`--out`）。
+
+设计底线：mysqltest 的**客户端指令**（`connect/connection/disconnect/exec`、`let $X=query_get_value/ssh`）
+**一律记为 UNSUPPORTED，不会当 SQL 发给服务器**（发过去只会得到一堆 1064 噪声），
+退出码把「有未支持指令」也算失败 ⇒ 它的 green 永远不等于「套件通过」，只等于「已验证的那些断言没红」。
+
+`file_sql_basic.actual-unpatched.txt` 是**未打补丁**的 1.4.0 上跑出来的现状转录（3 条断言、21 处不符、
+10 条客户端指令不支持），判分口径见台账 §26。

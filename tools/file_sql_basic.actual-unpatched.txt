@@ -1,0 +1,70 @@
+### source mysql_test/test_suite/file_sql/include/copy_file_sql_data.inc
+### let $FILE_SQL_HOST = query_get_value('select host_ip()',host_ip(), 1)
+!!! 非预期错误 1064: (1064, "You have an error in your SQL syntax; check the manual that corresponds to your OceanBase version for the right syntax to use near 'let $FILE_SQL_HOST = query_get_value('select host_ip()',host
+### let $FILE_SQL_DATA_DIR = D:/scratch/fsdata/data_for_mysqltest_file_sql
+!!! 非预期错误 1064: (1064, "You have an error in your SQL syntax; check the manual that corresponds to your OceanBase version for the right syntax to use near 'let $FILE_SQL_DATA_DIR = D:/scratch/fsdata/data_for_mysqltes
+### let $FILE_SQL_COPY_CMD = ssh $FILE_SQL_HOST 'rm -rf "$FILE_SQL_DATA_DIR" && mkdir -p "$FILE_SQL_DATA_DIR"' && scp -q $PWD/mysql_test/test_suite/file_sql/data/* $FILE_SQL_HOST:"$FILE_SQL_DATA_DIR/" && ssh $FILE_SQL_HOST 'base64 -d "$FILE_SQL_DATA_DIR/simple.parquet.b64" > "$FILE_SQL_DATA_DIR/simple.parquet" && rm -f "$FILE_SQL_DATA_DIR/simple.parquet.b64"'
+!!! 非预期错误 1064: (1064, 'You have an error in your SQL syntax; check the manual that corresponds to your OceanBase version for the right syntax to use near \'let $FILE_SQL_COPY_CMD = ssh $FILE_SQL_HOST \'rm -rf "$FILE
+### let $FILE_SQL_DATA_DIR = D:/scratch/fsdata/data_for_mysqltest_file_sql
+!!! 非预期错误 1064: (1064, "You have an error in your SQL syntax; check the manual that corresponds to your OceanBase version for the right syntax to use near 'let $FILE_SQL_DATA_DIR = D:/scratch/fsdata/data_for_mysqltes
+# # enable_file_sql defaults to OFF
+### select @@session.enable_file_sql AS default_enabled
+!!! 非预期错误 1193: (1193, "Unknown system variable 'enable_file_sql'")
+### select count(*) from read_csv('$FILE_SQL_DATA_DIR/basic.csv')
+1064: (1064, "You have an error in your SQL syntax; check the manual that corresponds to your OceanBase version for the right 
+!!! FAIL 期望 error [1235]，实际 1064: (1064, "You have an error in your SQL syntax; check the manual that corresponds to your OceanBase version for the right 
+### set session enable_file_sql = ON
+!!! 非预期错误 1193: (1193, "Unknown system variable 'enable_file_sql'")
+# # syntax and format validation
+### select count(*) from read_csv('$FILE_SQL_DATA_DIR/basic.csv')
+!!! 非预期错误 1064: (1064, "You have an error in your SQL syntax; check the manual that corresponds to your OceanBase version for the right syntax to use near '('$FILE_SQL_DATA_DIR/basic.csv')' at line 1")
+### select * from read_csv('$FILE_SQL_DATA_DIR/basic.csv', 'xml')
+1064: (1064, "You have an error in your SQL syntax; check the manual that corresponds to your OceanBase version for the right 
+--- ok（error [1064] 如预期）
+### select * from read_csv('$FILE_SQL_DATA_DIR/basic.csv', sample_size = 10)
+1064: (1064, "You have an error in your SQL syntax; check the manual that corresponds to your OceanBase version for the right 
+!!! FAIL 期望 error [1235]，实际 1064: (1064, "You have an error in your SQL syntax; check the manual that corresponds to your OceanBase version for the right 
+# # CSV scan, type conversion, duplicate headers and multiline quotes
+### select id, name, score, active, day, created,             replace(note, char(10), '<NL>') AS note, id__2        from read_csv('$FILE_SQL_DATA_DIR/basic.csv') f       order by id
+!!! 非预期错误 1064: (1064, "You have an error in your SQL syntax; check the manual that corresponds to your OceanBase version for the right syntax to use near '('$FILE_SQL_DATA_DIR/basic.csv') f       order by id' at lin
+### select count(*) AS row_count, sum(id) AS id_sum,             round(avg(score), 2) AS score_avg, sum(active) AS active_count        from read_csv('$FILE_SQL_DATA_DIR/basic.csv', header = true, sample_size = -1) f
+!!! 非预期错误 1064: (1064, "You have an error in your SQL syntax; check the manual that corresponds to your OceanBase version for the right syntax to use near '('$FILE_SQL_DATA_DIR/basic.csv', header = true, sample_size 
+# # JSONL union schema and missing fields
+### select id, name, score, active, day, note        from read_json('$FILE_SQL_DATA_DIR/basic.jsonl', format = 'newline_delimited') f       order by id
+!!! 非预期错误 1064: (1064, "You have an error in your SQL syntax; check the manual that corresponds to your OceanBase version for the right syntax to use near '('$FILE_SQL_DATA_DIR/basic.jsonl', format = 'newline_delimit
+# # inferred CSV schema using DuckDB DESCRIBE syntax
+### describe select * from read_csv('$FILE_SQL_DATA_DIR/basic.csv')
+!!! 非预期错误 1064: (1064, "You have an error in your SQL syntax; check the manual that corresponds to your OceanBase version for the right syntax to use near '('$FILE_SQL_DATA_DIR/basic.csv')' at line 1")
+# # Parquet scan and aggregate push through projected columns
+### select count(*) AS row_count, min(c1) AS min_c1,             max(c1) AS max_c1, sum(c1) AS sum_c1        from read_parquet('$FILE_SQL_DATA_DIR/simple.parquet') p
+!!! 非预期错误 1064: (1064, "You have an error in your SQL syntax; check the manual that corresponds to your OceanBase version for the right syntax to use near '('$FILE_SQL_DATA_DIR/simple.parquet') p' at line 1")
+# # DuckDB glob returns one file column
+### select substring_index(file, '/', -1) AS file        from glob('$FILE_SQL_DATA_DIR/*')       order by file
+!!! 非预期错误 1064: (1064, "You have an error in your SQL syntax; check the manual that corresponds to your OceanBase version for the right syntax to use near '('$FILE_SQL_DATA_DIR/*')       order by file' at line 1")
+# # COPY query to CSV and read it back
+### copy (select id, name, score              from read_csv('$FILE_SQL_DATA_DIR/basic.csv')             order by id)        to '$FILE_SQL_DATA_DIR/export.csv'        (format csv, header, nullstr 'NULL')
+!!! 非预期错误 1064: (1064, "You have an error in your SQL syntax; check the manual that corresponds to your OceanBase version for the right syntax to use near 'copy (select id, name, score              from read_csv('$FI
+### select id, name, score        from read_csv('$FILE_SQL_DATA_DIR/export.csv')       order by id
+!!! 非预期错误 1064: (1064, "You have an error in your SQL syntax; check the manual that corresponds to your OceanBase version for the right syntax to use near '('$FILE_SQL_DATA_DIR/export.csv')       order by id' at line
+### set session enable_file_sql = OFF
+!!! 非预期错误 1193: (1193, "Unknown system variable 'enable_file_sql'")
+### source mysql_test/test_suite/file_sql/include/remove_file_sql_data.inc
+### let $FILE_SQL_HOST = query_get_value('select host_ip()',host_ip(), 1)
+!!! 非预期错误 1064: (1064, "You have an error in your SQL syntax; check the manual that corresponds to your OceanBase version for the right syntax to use near 'let $FILE_SQL_HOST = query_get_value('select host_ip()',host
+### let $FILE_SQL_DATA_DIR = D:/scratch/fsdata/data_for_mysqltest_file_sql
+!!! 非预期错误 1064: (1064, "You have an error in your SQL syntax; check the manual that corresponds to your OceanBase version for the right syntax to use near 'let $FILE_SQL_DATA_DIR = D:/scratch/fsdata/data_for_mysqltes
+### let $FILE_SQL_CLEANUP_CMD = ssh $FILE_SQL_HOST 'rm -rf "$FILE_SQL_DATA_DIR"'
+!!! 非预期错误 1064: (1064, 'You have an error in your SQL syntax; check the manual that corresponds to your OceanBase version for the right syntax to use near \'let $FILE_SQL_CLEANUP_CMD = ssh $FILE_SQL_HOST \'rm -rf "$F
+
+======================================================================
+断言 3 条，失败 21 条
+未识别的指令 10 条 —— 这些**没有**被验证：
+   mysqltest 客户端指令（需要 mysqltest/ssh 环境）：connect (file_sql_cleanup,$OBMYSQL_MS0,admin,$OBMYSQL_PWD,test,$OBMYSQL_PORT);
+   mysqltest 客户端指令（需要 mysqltest/ssh 环境）：connect (file_sql_setup,$OBMYSQL_MS0,admin,$OBMYSQL_PWD,test,$OBMYSQL_PORT);
+   mysqltest 客户端指令（需要 mysqltest/ssh 环境）：connection default;
+   mysqltest 客户端指令（需要 mysqltest/ssh 环境）：connection file_sql_cleanup;
+   mysqltest 客户端指令（需要 mysqltest/ssh 环境）：connection file_sql_setup;
+   mysqltest 客户端指令（需要 mysqltest/ssh 环境）：disconnect file_sql_cleanup;
+   mysqltest 客户端指令（需要 mysqltest/ssh 环境）：disconnect file_sql_setup;
+   mysqltest 客户端指令（需要 mysqltest/ssh 环境）：exec $FILE_SQL_CLEANUP_CMD;
+   mysqltest 客户端指令（需要 mysqltest/ssh 环境）：exec $FILE_SQL_COPY_CMD;
