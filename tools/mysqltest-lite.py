@@ -59,9 +59,11 @@ class Runner:
         try:
             self.cur.execute(sql)
             rows = self.cur.fetchall()
-            got = "no error"
-            ok = False
-            self.emit(f"### {sql}\n(期望错误 {expected_codes}，实际无错误，返回 {len(rows)} 行)")
+            # mysqltest 的 `--error 0, 11118` 里 0 表示「成功也算对」，不能当失败——
+            # 之前把这种情况算成红，会让 DROP-if-exists 这类语句全变成假失败。
+            ok = 0 in expected_codes
+            got = "no error" if not ok else "no error（0 在允许集合里）"
+            self.emit(f"### {sql}\n(期望错误 {sorted(expected_codes)}，实际无错误，返回 {len(rows)} 行)")
         except pymysql.MySQLError as e:  # noqa: PERF203
             code = e.args[0] if e.args else None
             got = f"{code}: {str(e)[:120]}"
