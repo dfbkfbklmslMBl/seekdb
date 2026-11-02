@@ -1,0 +1,61 @@
+Subject: [DRAFT] AI COLUMN: add OB_AI_COLUMN_NOT_READY (-11120) for ai_column_strict_read
+
+NOT COMPILED, NOT RUN. src/share/ob_errno.{h,cpp} are generated from
+src/share/ob_errno.def by src/share/gen_errno.pl; this hunk only edits the
+source-of-truth .def. Regenerate before building, otherwise the new symbol will
+not exist.
+
+Why -11120 and why this exact wording (all proven, not guessed):
+
+  * tools/deploy/mysql_test/test_suite/ai_column/t/ai_column_retry_strict.test:68
+    uses `--error 11120`, and the same file normalises the message with
+    `--replace_regex /table_id=[0-9]+, column_id=[0-9]+/table_id=<table_id>,
+    column_id=<column_id>/`
+  * .../r/mysql/ai_column_retry_strict.result:53 records the rendered line as
+    `ERROR HY000: AI column has unfinished tasks for table_id=<table_id>,
+    column_id=<column_id>`
+    => SQLSTATE must be HY000, mysql errno slot must render as 11120, and the
+    user message must contain two unsigned integers in that exact shape.
+  * -11112..-11119 are the existing AI block (src/share/ob_errno.def:1884-1891)
+    and -11120 is free: `git grep -E '\-111[2-9][0-9]' origin/2026-competition
+    -- src/share/ob_errno.def` returns nothing, and the file has the marker
+    comment `// 余留位置` right after -11119.
+  * Numeric placeholders in DEFINE_ERROR_EXT user messages are already used in
+    this file, e.g. line 214 `Unknown thread id: %lu`.
+
+Everything else the tests demand reuses existing codes, so no further error
+definitions are added here (verified against the .result files):
+
+  * `--error 1235` (both ALTER messages, retry_strict.result:124,127 and
+    ddl.result:99)  -> OB_NOT_SUPPORTED -4007 / 0A000 / "%s not supported"
+    (ob_errno.def:77); pass "retrying a column that is not an AI column" and
+    "combining AI COLUMN RETRY with another ALTER action" as the %s argument.
+  * bad AI_EMBED dimension (ddl.result:93, `ERROR 22000: inconsistent
+    dimension: expected 4 got 3`) -> OB_ERR_INVALID_VECTOR_DIM -7600
+    (ob_errno.def:1677), already has exactly that message.
+  * business SQL writing an AI result column -> existing generated-column
+    errors -5290 / -5292 / -5293 (ob_errno.def:728-731).
+  * endpoint / model lookups during DDL -> -11112 / -11118 already in use by the
+    tests' own `--error 0,11112` and `--error 0,11118` guards.
+
+--- a/src/share/ob_errno.def
++++ b/src/share/ob_errno.def
+@@ -1889,6 +1889,23 @@
+ DEFINE_ERROR_EXT(OB_AI_FUNC_PARAM_TYPE_INVALID, -11117, -1, "HY000", "This param type is invalid", "This type of param \'%.*s\' is invalid, should be %.*s");
+ DEFINE_ERROR_EXT(OB_AI_FUNC_MODEL_NOT_FOUND, -11118, -1, "HY000", "This AI model is not found", "This AI model \'%.*s\' was not found");
+ DEFINE_ERROR_EXT(OB_AI_FUNC_MODEL_EXISTS, -11119, -1, "HY000", "This ai model is already exists", "This ai model \'%.*s\' is already exists");
++
++/* AI COLUMN (asynchronous).  Strict-read failure is reported per column, so
++ * the message carries the identifying pair the test normalises. */
++DEFINE_ERROR_EXT(OB_AI_COLUMN_NOT_READY, -11120, -1, "HY000", "AI column has unfinished tasks", "AI column has unfinished tasks for table_id=%lu, column_id=%lu");
++
++/* Reserved for the AI COLUMN paths that must distinguish a cause the tests do
++ * not exercise yet.  Keep the block contiguous; drop any entry that turns out
++ * unnecessary before regeneration. */
++DEFINE_ERROR_EXT(OB_AI_COLUMN_WRITE_FORBIDDEN, -11121, -1, "HY000", "Writing an AI column from business SQL is not allowed", "column '%.*s' is an AI COLUMN and cannot be assigned directly");
++DEFINE_ERROR_EXT(OB_AI_COLUMN_TASK_NOT_FOUND, -11122, -1, "HY000", "AI column task is not found", "AI column task for table_id=%lu, column_id=%lu is not found");
++DEFINE_ERROR_EXT(OB_AI_COLUMN_RESULT_TYPE_MISMATCH, -11123, -1, "HY000", "AI column result does not match the declared column type", "AI result cannot be converted to the declared type of column '%.*s'");
++DEFINE_ERROR_EXT(OB_AI_COLUMN_SYNC_MODE_NOT_SUPPORTED, -11124, -1, "HY000", "AI column sync mode is not supported", "AI COLUMN sync_mode '%.*s' is not supported, only async is supported");
+ // 余留位置
+ ////////////////////////////////////////////////////////////////
+ // SQL扩展区段1：[-11000, -12000)

@@ -1,0 +1,150 @@
+Subject: [DRAFT / SKETCH] AI COLUMN: parser surface for "AI COLUMN (expr) WITH (...)" and "RETRY AI COLUMN"
+
+*** THIS IS A DESIGN SKETCH, NOT AN APPLICABLE PATCH. ***
+It will not apply cleanly and nothing in it has been compiled or bison-checked.
+It is here because the grammar surface is fully determined by the shipped tests
+and because reading the parser revealed three concrete gotchas that are easy to
+miss (keyword RETRY does not exist; AI COLUMN must ride the existing generated
+column shape; ALTER actions are merged by node type).  Everything marked PROVEN
+was read off origin/2026-competition; everything else needs the implementer's
+decision on the Linux box.
+
+--------------------------------------------------------------------------
+1) Keyword situation (PROVEN, and this is the first thing to fix)
+--------------------------------------------------------------------------
+
+  * AI is already a non-reserved keyword: token list
+    src/sql/parser/sql_parser_mysql_mode.y:262, keyword alternatives at :16440
+    ("| AI { make_name_node(..., \"ai\"); }") and :17500 ("| AI" inside the
+    unreserved_keyword list), table entry in
+    src/sql/parser/non_reserved_keywords_mysql_mode.c.
+  * COLUMN already exists as a keyword (reserved list, .y:227).
+  * **RETRY does not exist as a token.** `grep -n RETRY sql_parser_mysql_mode.y`
+    only matches the compound MASTER_* keywords at :309-310.  So adding
+    `ALTER TABLE ... RETRY AI COLUMN` requires all three of:
+      a. `RETRY` token declaration in the %token block (starts .y:60 ff),
+      b. `{"retry", RETRY}` in non_reserved_keywords_mysql_mode.c (alphabetical
+         neighbours: :683 "reverse", :688 "role", :689 "rollback"),
+      c. `| RETRY` in the unreserved_keyword list (near .y:17500).
+    Then re-check tools/deploy/mysql_test/t/non_reserved_keyword.test (only 26
+    lines, does not enumerate AI/COLUMN today) so the new keyword does not turn
+    a green case red.
+
+--------------------------------------------------------------------------
+2) Column definition shape to copy (PROVEN)
+--------------------------------------------------------------------------
+
+The nearest existing rule, .y:4843 (generated columns), already threads
+"column name + data type + expression + attributes" through T_COLUMN_DEFINITION
+with 7 children:
+
+  | column_definition_ref data_type opt_collation opt_generated_keyname
+      AS '(' expr ')' opt_storage_type opt_generated_column_attribute_list
+      opt_column_reference opt_position_column
+    { ... malloc_non_terminal_node($$, result->malloc_pool_,
+          T_COLUMN_DEFINITION, 7, $1, $2, attributes, $7, $9, $12, $4); }
+
+`opt_generated_keyname` itself is at .y:4913-4931.  Do NOT silently widen
+T_COLUMN_DEFINITION's arity: ob_create_table_resolver.cpp /
+ob_alter_table_resolver.cpp index the children positionally.  Prefer a new
+non-terminal hanging off the attribute list, or a new item type, and let the
+resolver attach the AI column info to the column schema + CreateTableArg.
+
+Needed new item types (next free value is 2087 -- src/objit/include/objit/
+common/ob_item_type.h currently ends that block at T_FUN_SYS_BUCKET = 2086,
+line 918; confirm nothing above 2086 before taking these):
+
+  T_AI_COLUMN_CLAUSE      /* AI COLUMN ( expr ) WITH ( options ) */
+  T_AI_COLUMN_OPTION_LIST /* sync_mode='async', max_retries=N          */
+  T_RETRY_AI_COLUMN       /* ALTER TABLE action                        */
+
+Grammar sketch (illustrative only):
+
+--- a/src/sql/parser/sql_parser_mysql_mode.y
++++ b/src/sql/parser/sql_parser_mysql_mode.y
+@@ column_definition (existing alternatives around line 4843)
++| column_definition_ref data_type opt_collation
++  AI COLUMN '(' expr ')' WITH '(' ai_column_option_list ')'
++{
++  /* Same 7-child T_COLUMN_DEFINITION as the generated-column rule, with the
++   * AI clause hung on as an extra attribute node so positional consumers are
++   * untouched.  set_data_type_collation()/dup_expr_string() calls mirror the
++   * generated-column rule at :4843-4850 because the expression text must be
++   * preserved verbatim: ai_column_ddl.test:72-78 asserts on normalized_expr,
++   * which is produced from this node's printed form plus the result-type
++   * prompt. */
++  ParseNode *attributes = NULL;
++  set_data_type_collation($2, $3, true, false);
++  dup_expr_string($6, result, @6.first_column, @6.last_column);
++  ParseNode *ai_clause = NULL;
++  malloc_non_terminal_node(ai_clause, result->malloc_pool_, T_AI_COLUMN_CLAUSE,
++                           2, $6, $9);
++  merge_nodes(attributes, result, T_COLUMN_ATTRIBUTES, ai_clause);
++  malloc_non_terminal_node($$, result->malloc_pool_, T_COLUMN_DEFINITION, 7,
++                           $1, $2, attributes, NULL, NULL, NULL, NULL);
++}
++;
++
++ai_column_option_list:
++  ai_column_option
++| ai_column_option_list ',' ai_column_option
++;
++
++ai_column_option:
++  RELATION_NAME opt_equal_mark STRING_VALUE   /* sync_mode = 'async'   */
++| RELATION_NAME opt_equal_mark INTNUM         /* max_retries = N       */
++;
++
++/* Required by the tests verbatim:
++ *   WITH (sync_mode='async', max_retries=2)      -- ai_column_ddl.test:33
++ *   WITH (sync_mode='async', max_retries=3)      -- ai_column_ddl.test:36
++ * Only these two options appear anywhere in the shipped cases; unknown option
++ * names and sync_mode='sync' must be rejected in the resolver (the题面 limits
++ * this task to async).
++ */
+
+@@ alter_table_action (rule begins at .y:14694)
++| RETRY AI COLUMN relation_column opt_where_clause_for_retry_ai
++{
++  /* The two negative cases in ai_column_retry_strict.test:175-179 pin the
++   * error surface, and both are OB_NOT_SUPPORTED (-4007 -> mysql errno 1235,
++   * src/share/ob_errno.def:77, user msg template "%s not supported"):
++   *   retry ai column content  -> "retrying a column that is not an AI column"
++   *   retry ai column result where id = 1, add column extra_col int
++   *                            -> "combining AI COLUMN RETRY with another
++   *                               ALTER action"
++   * The second one is enforced in the resolver, not the grammar: alter_table_
++   * action nodes arrive as a list, so count them and reject when a
++   * T_RETRY_AI_COLUMN shares the statement with anything else.
++   * RETRY must target exactly one column and accepts an optional WHERE whose
++   * bare `status` identifier is a *pseudo column* resolved against the AI
++   * state column, while `` `status` `` (backquoted) resolves against the
++   * physical business column of that name -- ai_column_retry_strict.test:114-
++   * 116 vs :170 prove both behaviours on a table that really has a `status`
++   * varchar(20) column (:21).  Preserve the quote-ness of the identifier
++   * through the parse tree (delimited-name flag) so the resolver can tell
++   * them apart; that flag, not the string, is the discriminator.
++   */
++}
+
+--------------------------------------------------------------------------
+3) What is deliberately NOT sketched here
+--------------------------------------------------------------------------
+
+  * `SHOW AI COLUMNS` (named in the题面's unittest list, and *not* exercised by
+    any shipped mysqltest) -- no grammar evidence to work from.  Because the
+    unittest harness is missing entirely (GAP.md §1), this sub-feature has no
+    acceptance target at all; implement it only after the 5 shipped cases pass,
+    and expect hidden tests there.
+  * The ALTER path plumbing (ObAlterTableArg / a new ObAIColumnRetryArg /
+    rootserver/ob_ddl_service.cpp entry) -- needs a design decision on whether
+    RETRY is a schema operation at all (it is a data operation: it must
+    invalidate rows and enqueue tasks, and the tests expect it to be
+    transactional with the row state).  Guessing the RPC/arg shape in a patch
+    would be worse than leaving it out.
+  * Anything touching src/sql/engine/expr/ob_expr_ai/* or
+    src/share/ai_service/ob_ai_service_struct.cpp: another agent owns those
+    (D:\scratch\ai-fn\, 5 patches).  The type prompt strings
+    ("Return exactly one valid JSON value", "base-10 integer") must therefore
+    live in the new AI COLUMN module and be injected when the worker builds the
+    system message, not by editing AI_COMPLETE's own behaviour.

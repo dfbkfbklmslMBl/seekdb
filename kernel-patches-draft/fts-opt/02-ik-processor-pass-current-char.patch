@@ -1,0 +1,57 @@
+--- a/src/storage/fts/ik/ob_ik_processor.h
++++ b/src/storage/fts/ik/ob_ik_processor.h
+@@ -101,7 +101,14 @@
+ 
+   virtual ~ObIIKProcessor() {}
+ 
+-  int process(TokenizeContext &ctx);
++  // The driver in ObIKFTParser::process_next_batch() has already decoded the
++  // character under the cursor before handing it to the processors, and no
++  // processor moves the cursor, so the current character and its type are
++  // passed in instead of being re-derived (twice per processor per character).
++  int process(TokenizeContext &ctx,
++              const char *ch,
++              const uint8_t char_len,
++              const ObFTCharUtil::CharType type);
+ 
+   virtual int do_process(TokenizeContext &ctx,
+                          const char *ch,
+--- a/src/storage/fts/ik/ob_ik_processor.cpp
++++ b/src/storage/fts/ik/ob_ik_processor.cpp
+@@ -31,19 +31,13 @@
+ {
+ namespace storage
+ {
+-int ObIIKProcessor::process(TokenizeContext &ctx)
++int ObIIKProcessor::process(
++    TokenizeContext &ctx,
++    const char *ch,
++    const uint8_t char_len,
++    const ObFTCharUtil::CharType type)
+ {
+-  int ret = OB_SUCCESS;
+-
+-  ObFTCharUtil::CharType type;
+-  const char *ch = nullptr;
+-  uint8_t char_len = 0;
+-
+-  if (OB_FAIL(ctx.current_char_type(type))) {
+-  } else if (OB_FAIL(ctx.current_char(ch, char_len))) {
+-  } else if (OB_FAIL(do_process(ctx, ch, char_len, type))) {
+-  }
+-  return ret;
++  return do_process(ctx, ch, char_len, type);
+ }
+ 
+ TokenizeContext::TokenizeContext(ObCollationType coll_type,
+--- a/src/storage/fts/ob_ik_ft_parser.cpp
++++ b/src/storage/fts/ob_ik_ft_parser.cpp
+@@ -138,7 +138,7 @@
+   for (ObList<ObIIKProcessor *, ObIAllocator>::iterator iter = segmenters_.begin();
+        OB_SUCC(ret) && iter != segmenters_.end();
+        iter++) {
+-    if (OB_FAIL((*iter)->process(ctx))) {
++    if (OB_FAIL((*iter)->process(ctx, ch, char_len, type))) {
+     }
+   }
+   return ret;

@@ -1,0 +1,51 @@
+Subject: [DRAFT] AI COLUMN: add session variable ai_column_strict_read
+
+NOT COMPILED, NOT RUN. src/share/system_variable/ob_system_variable_init.{h,cpp},
+ob_sys_var_class_type.h and ob_system_variable_alias.h are generated from this
+json by src/share/system_variable/gen_ob_sys_variables.py; regenerate (and check
+whether src/share/system_variable/standalone_default_system_variable.extra needs
+a matching entry) before building.
+
+Requirements taken from the shipped tests (proven):
+
+  * tools/deploy/mysql_test/test_suite/ai_column/t/ai_column_retry_strict.test:48
+      select @@ai_column_strict_read as strict_read_defaults_off;
+    .../r/mysql/ai_column_retry_strict.result:29-30  -> value must be **0**
+    So the default is OFF; a non-default-on switch is mandatory or the DML and
+    worker tests would fail on their first read.
+  * same file lines 54,61,87,107,111,132,135: `SET SESSION
+    ai_column_strict_read = ON|OFF` -> SESSION scope is what is exercised.
+    A SESSION-only bool is a well-trodden shape in this file, e.g.
+    "pseudo_slave_mode" (id 10292, data_type bool, flags "SESSION",
+    default_value/base_value "0"), json lines 5076-5083.
+  * The variable is checked at *execution* time (a statement on the same table
+    errors before and after the task rows are cleaned -- test lines 68-86 vs
+    107-110), so it must be reachable from the executor's session info, i.e.
+    keep it a plain session var rather than a tenant config.
+
+The id is the next free one after the current maximum (10753 =
+ob_sparse_drop_ratio_search, json lines 10964-10978). Confirm the generator does
+not require ids to be allocated from a reserved range before accepting 10754.
+
+--- a/src/share/system_variable/ob_system_variable_init.json
++++ b/src/share/system_variable/ob_system_variable_init.json
+@@ -10966,6 +10966,19 @@
+     "publish_version": "1.0.0.0",
+     "info_cn": "",
+     "background_cn": "",
+     "ref_url": ""
++  },
++  "ai_column_strict_read": {
++    "id": 10754,
++    "name": "ai_column_strict_read",
++    "default_value": "0",
++    "base_value": "0",
++    "data_type": "bool",
++    "info": "When enabled, a statement that references an AI COLUMN whose column is not fully READY fails with OB_AI_COLUMN_NOT_READY instead of reading NULL",
++    "flags": "SESSION",
++    "publish_version": "1.0.0.0",
++    "info_cn": "",
++    "background_cn": "",
++    "ref_url": ""
+   }
+ }

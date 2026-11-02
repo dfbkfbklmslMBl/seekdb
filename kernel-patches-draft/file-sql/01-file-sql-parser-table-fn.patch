@@ -1,0 +1,282 @@
+Subject: [file-sql 1/2] sql parser: read_csv/read_json/read_ndjson/read_parquet/glob as table factors
+
+Adds the SQL surface for competition task 2 ("文件即数据库"): the five file
+table functions accepted in FROM, their "name = value" option list, and the
+three new parse-node item types.
+
+Grammar only - nothing consumes the new node types yet, so ordinary SQL is
+unchanged.  The names go into unreserved_keyword_normal, so existing
+statements that use read_csv / glob / header / sample_size as an identifier
+keep parsing (spec: 不得破坏现有普通 SQL).
+
+The argument shape is deliberately strict: one positional path plus
+"key = value" options only.  That is what makes
+    select * from read_csv('a.csv', 'xml')
+fail in the parser with ER_PARSE_ERROR (1064) while
+    select * from read_csv('a.csv', sample_size = 10)
+parses and is left for the resolver to reject with OB_NOT_SUPPORTED (1235),
+matching file_sql_basic.test:23-26.  OB_ERR_PARSER_SYNTAX would map to 1149,
+not 1064, so the rejection genuinely has to come from bison.
+
+Option values use conf_const rather than INTNUM because sample_size must
+accept -1: INTNUM alone cannot carry a minus sign (cf. the "'-' INTNUM"
+alternative of conf_const, sql_parser_mysql_mode.y:1118).
+
+Option keys reuse the existing external_file_format nonterminal
+(sql_parser_mysql_mode.y:7294-7370), so FIELD_DELIMITER / ESCAPE /
+FIELD_OPTIONALLY_ENCLOSED_BY / ENCODING / COMPRESSION / NULL_IF_EXETERNAL
+etc. come for free; only HEADER, SAMPLE_SIZE and FORMAT are new.
+
+NOT COMPILED AND NOT BISON-CHECKED.  bison/flex/win_flex_bison are all absent
+on the machine this was drafted on, and deps/3rd does not exist.  Before
+merging, run the check the repo already automates:
+    win_bison -v -Wno-deprecated -Wno-other -d sql_parser_mysql_mode.y \
+              -o out.c --report-file=out.report
+(that is exactly src/sql/parser/gen_parser_win.ps1:27, which treats any
+output matching "conflict" as fatal).  Watch HEADER/SAMPLE_SIZE/FORMAT
+against the pre-existing "explain_or_desc FORMAT COMP_EQ format_name" (:12300)
+and "SHOW TRACE FORMAT COMP_EQ STRING_VALUE" (:12740).  Note the Linux
+generator pins bison to 2.4.1 (src/sql/parser/gen_parser.sh:33-38), so a
+clean run on a newer win_bison still wants one confirmation on 2.4.1.
+
+NULLSTR is registered but not yet used by any production - it belongs to the
+COPY patch.  Drop the NULLSTR lines if that is a problem for your build.
+
+diff -urN A/src/query/api/query/parser/ob_item_type.h B/src/query/api/query/parser/ob_item_type.h
+--- A/src/query/api/query/parser/ob_item_type.h	2026-11-01 23:42:57.250643100 +0800
++++ B/src/query/api/query/parser/ob_item_type.h	2026-11-01 23:42:57.179611700 +0800
+@@ -2275,6 +2275,11 @@
+   T_DIFF_TABLE = 4918,
+   T_MERGE_TABLE = 4919,
+   T_FLUSH_PRIVILEGES = 4920,
++  /* file-as-database (competition task 2): read_csv / read_json / read_ndjson /
++     read_parquet / glob table functions and their option nodes. */
++  T_FILE_TABLE_EXPRESSION = 4921,
++  T_FILE_TABLE_SAMPLE_SIZE = 4922,
++  T_FILE_TABLE_FORMAT_NAME = 4923,
+   T_MAX //Attention: add a new type before T_MAX
+ } ObItemType;
+ 
+diff -urN A/src/sql/parser/non_reserved_keywords_mysql_mode.c B/src/sql/parser/non_reserved_keywords_mysql_mode.c
+--- A/src/sql/parser/non_reserved_keywords_mysql_mode.c	2026-11-01 23:42:57.226221900 +0800
++++ B/src/sql/parser/non_reserved_keywords_mysql_mode.c	2026-11-01 23:42:57.156392400 +0800
+@@ -958,6 +958,15 @@
+   {"INCONSISTENT", INCONSISTENT},
+   {"INDIVIDUAL", INDIVIDUAL},
+   {"hybrid_search", HYBRID_SEARCH},
++  // file-as-database (competition task 2)
++  {"glob", GLOB},
++  {"header", HEADER},
++  {"nullstr", NULLSTR},
++  {"read_csv", READ_CSV},
++  {"read_json", READ_JSON},
++  {"read_ndjson", READ_NDJSON},
++  {"read_parquet", READ_PARQUET},
++  {"sample_size", SAMPLE_SIZE}
+ };
+ 
+ /** https://dev.mysql.com/doc/refman/5.7/en/sql-syntax-prepared-statements.html
+diff -urN A/src/sql/parser/sql_parser_mysql_mode.y B/src/sql/parser/sql_parser_mysql_mode.y
+--- A/src/sql/parser/sql_parser_mysql_mode.y	2026-11-01 23:42:57.203705700 +0800
++++ B/src/sql/parser/sql_parser_mysql_mode.y	2026-11-01 23:42:57.132883100 +0800
+@@ -370,6 +370,9 @@
+         OPTIMIZER_COSTS
+ 
+         ORGANIZATION
++
++        // file-as-database (competition task 2)
++        GLOB HEADER NULLSTR READ_CSV READ_JSON READ_NDJSON READ_PARQUET SAMPLE_SIZE
+ //-----------------------------non_reserved keyword end---------------------------------------------
+ %type <node> sql_stmt stmt_list stmt opt_end_p
+ %type <node> select_stmt update_stmt delete_stmt
+@@ -511,6 +514,7 @@
+ %type <node> column_list_with_boost with_param_column_ref
+ %type <node> es_sql_opt
+ %type <node> hybrid_search_expr hybrid_search_param
++%type <node> file_table_expr file_table_arg file_table_option_list file_table_option
+ %type <node> vector_similarity_expr vector_similarity_metric
+ %type <node> algorithm_opt lock_opt
+ %type <node> flush_privileges_stmt opt_flush_privileges_scope
+@@ -10848,6 +10852,10 @@
+ {
+   $$ = $1;
+ }
++| file_table_expr
++{
++  $$ = $1;
++}
+ ;
+ 
+ tbl_name:
+@@ -17467,6 +17475,156 @@
+   malloc_non_terminal_node($$, result->malloc_pool_, T_HYBRID_SEARCH_EXPRESSION, 3, $3, $5, $8);
+ }
+ ;
++/* ------------------------------------------------------------------------- *
++ * File-as-database table functions (competition task 2, "赛题二：文件即数据库").
++ *
++ * Accepted shape:
++ *     read_csv('<path>' [, name = value ...]) [[AS] alias]
++ *     read_json / read_ndjson / read_parquet / glob  ... same shape
++ *
++ * The argument list is deliberately strict: exactly ONE positional argument
++ * (the path) and every further argument must be a "name = value" option.
++ * That is what makes the two negative cases of file_sql_basic.test:23-26
++ * resolve to two DIFFERENT mysql errnos:
++ *   select * from read_csv('a.csv', 'xml')       -> fails HERE, ER_PARSE_ERROR (1064)
++ *   select * from read_csv('a.csv', sample_size = 10)
++ *                                                -> parses fine, the resolver
++ *                                                   rejects the VALUE with
++ *                                                   OB_NOT_SUPPORTED -> 1235
++ * The keyword names are non-reserved, so "select read_csv from t" and
++ * "CREATE TABLE glob (...)" keep working: no existing SQL is broken.
++ * ------------------------------------------------------------------------- */
++
++/* children: [0]=path STRING_VALUE, [1]=options T_EXPR_LIST or NULL,
++ *           [2]=alias name node or NULL;  value_ = file function kind. */
++file_table_expr:
++READ_CSV '(' file_table_arg ')'
++{
++  malloc_non_terminal_node($$, result->malloc_pool_, T_FILE_TABLE_EXPRESSION, 3, $3->children_[0], $3->children_[1], NULL);
++  $$->value_ = 0; /* READ_CSV */
++}
++| READ_CSV '(' file_table_arg ')' relation_name
++{
++  malloc_non_terminal_node($$, result->malloc_pool_, T_FILE_TABLE_EXPRESSION, 3, $3->children_[0], $3->children_[1], $5);
++  $$->value_ = 0; /* READ_CSV */
++}
++| READ_CSV '(' file_table_arg ')' AS relation_name
++{
++  malloc_non_terminal_node($$, result->malloc_pool_, T_FILE_TABLE_EXPRESSION, 3, $3->children_[0], $3->children_[1], $6);
++  $$->value_ = 0; /* READ_CSV */
++}
++| READ_JSON '(' file_table_arg ')'
++{
++  malloc_non_terminal_node($$, result->malloc_pool_, T_FILE_TABLE_EXPRESSION, 3, $3->children_[0], $3->children_[1], NULL);
++  $$->value_ = 1; /* READ_JSON */
++}
++| READ_JSON '(' file_table_arg ')' relation_name
++{
++  malloc_non_terminal_node($$, result->malloc_pool_, T_FILE_TABLE_EXPRESSION, 3, $3->children_[0], $3->children_[1], $5);
++  $$->value_ = 1; /* READ_JSON */
++}
++| READ_JSON '(' file_table_arg ')' AS relation_name
++{
++  malloc_non_terminal_node($$, result->malloc_pool_, T_FILE_TABLE_EXPRESSION, 3, $3->children_[0], $3->children_[1], $6);
++  $$->value_ = 1; /* READ_JSON */
++}
++| READ_NDJSON '(' file_table_arg ')'
++{
++  malloc_non_terminal_node($$, result->malloc_pool_, T_FILE_TABLE_EXPRESSION, 3, $3->children_[0], $3->children_[1], NULL);
++  $$->value_ = 2; /* READ_NDJSON */
++}
++| READ_NDJSON '(' file_table_arg ')' relation_name
++{
++  malloc_non_terminal_node($$, result->malloc_pool_, T_FILE_TABLE_EXPRESSION, 3, $3->children_[0], $3->children_[1], $5);
++  $$->value_ = 2; /* READ_NDJSON */
++}
++| READ_NDJSON '(' file_table_arg ')' AS relation_name
++{
++  malloc_non_terminal_node($$, result->malloc_pool_, T_FILE_TABLE_EXPRESSION, 3, $3->children_[0], $3->children_[1], $6);
++  $$->value_ = 2; /* READ_NDJSON */
++}
++| READ_PARQUET '(' file_table_arg ')'
++{
++  malloc_non_terminal_node($$, result->malloc_pool_, T_FILE_TABLE_EXPRESSION, 3, $3->children_[0], $3->children_[1], NULL);
++  $$->value_ = 3; /* READ_PARQUET */
++}
++| READ_PARQUET '(' file_table_arg ')' relation_name
++{
++  malloc_non_terminal_node($$, result->malloc_pool_, T_FILE_TABLE_EXPRESSION, 3, $3->children_[0], $3->children_[1], $5);
++  $$->value_ = 3; /* READ_PARQUET */
++}
++| READ_PARQUET '(' file_table_arg ')' AS relation_name
++{
++  malloc_non_terminal_node($$, result->malloc_pool_, T_FILE_TABLE_EXPRESSION, 3, $3->children_[0], $3->children_[1], $6);
++  $$->value_ = 3; /* READ_PARQUET */
++}
++| GLOB '(' file_table_arg ')'
++{
++  malloc_non_terminal_node($$, result->malloc_pool_, T_FILE_TABLE_EXPRESSION, 3, $3->children_[0], $3->children_[1], NULL);
++  $$->value_ = 4; /* GLOB: discovery only, one "file" column */
++}
++| GLOB '(' file_table_arg ')' relation_name
++{
++  malloc_non_terminal_node($$, result->malloc_pool_, T_FILE_TABLE_EXPRESSION, 3, $3->children_[0], $3->children_[1], $5);
++  $$->value_ = 4; /* GLOB */
++}
++| GLOB '(' file_table_arg ')' AS relation_name
++{
++  malloc_non_terminal_node($$, result->malloc_pool_, T_FILE_TABLE_EXPRESSION, 3, $3->children_[0], $3->children_[1], $6);
++  $$->value_ = 4; /* GLOB */
++}
++;
++
++/* path plus the optional "name = value" option list */
++file_table_arg:
++STRING_VALUE
++{
++  malloc_non_terminal_node($$, result->malloc_pool_, T_LINK_NODE, 2, $1, NULL);
++}
++| STRING_VALUE ',' file_table_option_list
++{
++  ParseNode *params = NULL;
++  merge_nodes(params, result, T_EXPR_LIST, $3);
++  malloc_non_terminal_node($$, result->malloc_pool_, T_LINK_NODE, 2, $1, params);
++}
++;
++
++file_table_option_list:
++file_table_option
++{
++  $$ = $1;
++}
++| file_table_option_list ',' file_table_option
++{
++  malloc_non_terminal_node($$, result->malloc_pool_, T_LINK_NODE, 2, $1, $3);
++}
++;
++
++/* DuckDB spellings on top of the existing LOAD DATA / INTO OUTFILE option
++ * vocabulary (external_file_format already models FIELD_DELIMITER, ESCAPE,
++ * FIELD_OPTIONALLY_ENCLOSED_BY, ENCODING, COMPRESSION, PARSE_HEADER,
++ * NULL_IF_EXETERNAL, EMPTY_FIELD_AS_NULL, ...).
++ * Values use conf_const, not INTNUM, because sample_size must accept the
++ * literal -1: INTNUM alone cannot carry a minus sign (see the '-' INTNUM
++ * alternative of conf_const at sql_parser_mysql_mode.y:1118). */
++file_table_option:
++HEADER COMP_EQ conf_const
++{
++  malloc_non_terminal_node($$, result->malloc_pool_, T_PARSE_HEADER, 1, $3);
++}
++| SAMPLE_SIZE COMP_EQ conf_const
++{
++  malloc_non_terminal_node($$, result->malloc_pool_, T_FILE_TABLE_SAMPLE_SIZE, 1, $3);
++}
++| FORMAT COMP_EQ conf_const
++{
++  malloc_non_terminal_node($$, result->malloc_pool_, T_FILE_TABLE_FORMAT_NAME, 1, $3);
++}
++| external_file_format
++{
++  $$ = $1;
++}
++;
+ 
+ hybrid_search_param:
+ literal
+@@ -18181,6 +18339,14 @@
+ |       INCONSISTENT 
+ |       INDIVIDUAL
+ |       HYBRID_SEARCH
++|       GLOB
++|       HEADER
++|       NULLSTR
++|       READ_CSV
++|       READ_JSON
++|       READ_NDJSON
++|       READ_PARQUET
++|       SAMPLE_SIZE
+ ;
+ 
+ unreserved_keyword_special:

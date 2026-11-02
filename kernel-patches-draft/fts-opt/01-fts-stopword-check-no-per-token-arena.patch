@@ -1,0 +1,81 @@
+--- a/src/storage/fts/ob_fts_stop_word.h
++++ b/src/storage/fts/ob_fts_stop_word.h
+@@ -78,7 +78,11 @@
+ 
+   int init();
+   void destroy();
+-  int check_stopword(const ObFTWord &word, bool &is_stopword);
++  // @convert_alloc is only used when the token has to be converted into the
++  // stopword charset.  Callers own a statement/document scoped arena and pass
++  // it in, so that a stopword probe does not have to create and destroy an
++  // allocator for every single token.
++  int check_stopword(const ObFTWord &word, bool &is_stopword, common::ObIAllocator &convert_alloc);
+ 
+ private:
+   static const int64_t DEFAULT_STOPWORD_BUCKET_NUM = 37L;
+--- a/src/storage/fts/ob_fts_stop_word.cpp
++++ b/src/storage/fts/ob_fts_stop_word.cpp
+@@ -71,12 +71,12 @@
+   }
+ }
+ 
+-int ObStopWordChecker::check_stopword(const ObFTWord &word, bool &is_stopword)
++int ObStopWordChecker::check_stopword(
++    const ObFTWord &word,
++    bool &is_stopword,
++    common::ObIAllocator &convert_alloc)
+ {
+   int ret = OB_SUCCESS;
+-  
+-  
+-  common::ObArenaAllocator allocator(lib::ObMemAttr("ChkStopWord"));
+   if (OB_UNLIKELY(!inited_)) {
+     ret = OB_NOT_INIT;
+   } else if (OB_UNLIKELY(word.empty())) {
+@@ -84,13 +84,30 @@
+   } else {
+     common::ObString cmp_str;
+     // do nothing set out with in if type is the same.
+-    if (OB_FAIL(common::ObCharset::charset_convert(
+-                                       allocator,
+-                                       word.get_word().get_string(),
+-                                       word.get_collation_type(),
+-                                       stopword_type_.get_collation_type(),
+-                                       cmp_str))) {
+-    } else {
++    //
++    // ObCharset::charset_convert() is a pure shallow assignment whenever the
++    // source and the destination collations share the same charset
++    // (see the charset_type_by_coll() short circuit in ObCharset::charset_convert
++    // with convert_flag == 0).  Tokens and stopwords are both utf8mb4 in every
++    // built-in parser, so building a throw away arena per token only to let the
++    // conversion alias the input was pure overhead.  The case insensitive
++    // semantics do not come from the conversion but from stopword_type_ below,
++    // which is what the stopword hash set was built with, so the probe result is
++    // unchanged.
++    const common::ObString src_str = word.get_word().get_string();
++    const ObCollationType src_coll_type = word.get_collation_type();
++    const ObCollationType dst_coll_type = stopword_type_.get_collation_type();
++    if (common::ObCharset::charset_type_by_coll(src_coll_type)
++        == common::ObCharset::charset_type_by_coll(dst_coll_type)) {
++      cmp_str = src_str;
++    } else if (OB_FAIL(common::ObCharset::charset_convert(
++                       convert_alloc,
++                       src_str,
++                       src_coll_type,
++                       dst_coll_type,
++                       cmp_str))) {
++    }
++    if (OB_SUCC(ret)) {
+       ObFTWord converted(cmp_str.length(), cmp_str.ptr(), stopword_type_);
+       ret = stopword_set_.exist_refactored(converted);
+       if (OB_HASH_NOT_EXIST == ret) {
+@@ -189,7 +206,7 @@
+     ObStopWordChecker *stop_word_checker = ObFTParseData::instance().stop_word_checker();
+     if (OB_ISNULL(stop_word_checker)) {
+       ret = OB_ERR_UNEXPECTED;
+-    } else if (OB_FAIL(stop_word_checker->check_stopword(ft_word, is_stopword))) {
++    } else if (OB_FAIL(stop_word_checker->check_stopword(ft_word, is_stopword, allocator_))) {
+     }
+   }
+   return ret;

@@ -1,0 +1,21 @@
+--- a/src/sql/engine/expr/ob_expr_tokenize.cpp
++++ b/src/sql/engine/expr/ob_expr_tokenize.cpp
+@@ -86,8 +86,6 @@
+   int64_t doc_len = 0;
+   storage::ObFTWordMap token_map;
+ 
+-  ObArenaAllocator tmp_parse_alloc(ObMemAttr("Tmp buffer"));
+-
+   if (TokenizeParam::OUTPUT_MODE::DEFAULT != mode && TokenizeParam::OUTPUT_MODE::ALL != mode) {
+     ret = OB_INVALID_ARGUMENT;
+   } else if (OB_FAIL(tokenize_helper.init(&allocator, param.parser_name_, param.properties_))) {
+--- a/src/observer/composition/retrieval/ob_das_legacy_tr_merge_iter.cpp
++++ b/src/observer/composition/retrieval/ob_das_legacy_tr_merge_iter.cpp
+@@ -1110,7 +1110,6 @@
+     const ObObjMeta &meta = search_text->obj_meta_;
+     int64_t doc_length = 0;
+     storage::ObFTParseHelper tokenize_helper;
+-    common::ObSEArray<ObFTWord, 16> tokens;
+     hash::ObHashMap<ObFTWord, int64_t> token_map;
+     const int64_t ft_word_bkt_cnt = MAX(search_text_string.length() / 10, 2);
+     if (OB_FAIL(tokenize_helper.init(&alloc, parser_name, parser_properties))) {

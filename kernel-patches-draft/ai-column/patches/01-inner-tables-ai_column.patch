@@ -1,0 +1,154 @@
+Subject: [DRAFT] AI COLUMN: add __all_ai_column and __all_ai_column_task inner table definitions
+
+NOT COMPILED, NOT RUN. This machine has no Linux toolchain and the inner-table
+schema is a build-time generated artifact (src/share/inner_table/
+generate_inner_table_schema.py, invoked from CMakeLists.txt:38). After applying
+this hunk you must re-run the generator and rebuild; nothing here was verified.
+
+Column names below are not a free design choice: every one of them is referenced
+by the shipped acceptance tests on origin/2026-competition, so the names are hard
+requirements:
+
+  oceanbase.__all_ai_column(table_id, column_id, column_name, state_column_id,
+      request_column_id, result_spec_column_id, max_retries, normalized_expr)
+      <- tools/deploy/mysql_test/test_suite/ai_column/t/ai_column_ddl.test:39-78
+  oceanbase.__all_ai_column_task(table_id, rowkey_predicate, request_id, state,
+      retry_count, eligible_ts)
+      <- .../t/ai_column_t1_dml.test:32-37,101-106,151-156
+      <- .../t/ai_column_worker.test:42-47,95-101
+      <- .../t/ai_column_vector_index.test:58-63,109-114
+
+Rowkey choice for the task table: (table_id, request_id, column_id) makes the
+"one request group per row/change, one task row per AI column" assertion
+(count(*) = 2 and count(distinct request_id) = 1) structurally true rather than
+something the DML path has to remember to uphold.
+
+table_id 1131/1132 are unused on this ref (only 1128/1129/1130 for the AI model
+tables and 1133/1134 for __all_objauth_mysql are taken in that range; grep for
+'113[12]' and '113[5-9]' in the def file returns nothing).
+
+--- a/src/share/inner_table/ob_inner_table_schema_def.py
++++ b/src/share/inner_table/ob_inner_table_schema_def.py
+@@ -2444,10 +2444,77 @@
+         ('response_transform_fn', 'varchar:64', 'true')
+     ]
+ )
+ def_table_schema(**all_ai_model_endpoint_def)
+ 
+ 
++# ---------------------------------------------------------------------------
++# AI COLUMN (2026 competition, task 3)
++#
++# __all_ai_column is the per-column registry of asynchronous AI columns.  The
++# result column itself is an ordinary user-visible column of __all_column; the
++# three hidden companion columns (state / request / result spec) are allocated
++# when the AI column is created and their ids are recorded here so that:
++#   - the DML invalidation path knows which hidden columns to write,
++#   - the worker knows which columns to publish in its single "grouped"
++#     transaction,
++#   - ALTER TABLE ... RETRY AI COLUMN can locate the column by name.
++#
++# TODO(verify): 'timestamp' granularity for microsecond comparisons.  The test
++# uses "eligible_ts <= now(6)"; no existing inner table in this ref declares a
++# fractional-second column, so confirm the generated type is timestamp(6) and
++# not truncated to seconds before relying on sub-second ordering.
++# ---------------------------------------------------------------------------
++all_ai_column_def = dict(
++    owner = '2026-competition',
++    table_name = '__all_ai_column',
++    table_id = '1131',
++    table_type = 'SYSTEM_TABLE',
++    gm_columns = ['gmt_create', 'gmt_modified'],
++    rowkey_columns = [
++        ('table_id', 'int'),
++        ('column_id', 'int')
++    ],
++    is_cluster_private = False,
++    meta_record_in_sys = False,
++    normal_columns = [
++        ('database_id', 'int', 'false', '0'),
++        ('column_name', 'varchar:OB_MAX_COLUMN_NAME_LENGTH', 'false', ''),
++        # 3 hidden companion columns, ids allocated together with column_id
++        ('state_column_id', 'int', 'false', '0'),
++        ('request_column_id', 'int', 'false', '0'),
++        ('result_spec_column_id', 'int', 'false', '0'),
++        # generation rule: printed expression with the result-type prompt
++        # already appended (ai_column_ddl.test:72-78 requires
++        # normalized_expr LIKE '%Return exactly one valid JSON value%')
++        ('expression', 'longtext', 'true'),
++        ('normalized_expr', 'longtext', 'true'),
++        ('dep_column_ids', 'longtext', 'true'),   # ordered dependency list
++        ('model_name', 'varchar:128', 'true'),
++        ('func_type', 'int', 'false', '0'),       # AI_COMPLETE / AI_EMBED
++        ('result_type', 'int', 'false', '0'),
++        ('expect_dimension', 'int', 'false', '0'),# vector(N) declared dimension
++        ('sync_mode', 'varchar:32', 'false', 'async'),
++        ('max_retries', 'int', 'false', '0'),
++        ('retry_interval_us', 'int', 'false', '0'),
++        ('definition_version', 'int', 'false', '0'),  # stale-task rejection
++        ('schema_version', 'int', 'false', '0')
++    ]
++)
++
++def_table_schema(**all_ai_column_def)
++
++# Persistent AI column task queue.  Rows are inserted inside the *business*
++# transaction that mutates the dependency columns, which is what gives us
++# "commit then call the model / rollback leaves no task and no request /
++# delete cleans pending tasks" for free (see PLAN.md R1 for how the write is
++# performed).  Terminal states delete the row, so "queue drained" is directly
++# observable from SQL -- several tests assert count(*) = 0.
++def_table_schema(
++    owner = '2026-competition',
++    table_name = '__all_ai_column_task',
++    table_id = '1132',
++    table_type = 'SYSTEM_TABLE',
++    gm_columns = ['gmt_create', 'gmt_modified'],
++    rowkey_columns = [
++        ('table_id', 'int'),
++        ('request_id', 'int'),
++        ('column_id', 'int')
++    ],
++    is_cluster_private = False,
++    meta_record_in_sys = False,
++    normal_columns = [
++        ('database_id', 'int', 'false', '0'),
++        ('tablet_id', 'int', 'false', '0'),
++        # row locator text used for the write-back UPDATE, e.g. "`id` = 2"
++        ('rowkey_predicate', 'varchar:OB_MAX_ERROR_MSG_LEN', 'false', ''),
++        ('state', 'int', 'false', '0'),
++        ('retry_count', 'int', 'false', '0'),
++        ('eligible_ts', 'timestamp', 'true'),
++        # ownership / recovery: which server claimed it and when the lease dies
++        ('owner_server', 'varchar:OB_MAX_SERVER_NAME_LENGTH', 'true'),
++        ('lease_expire_ts', 'timestamp', 'true'),
++        ('definition_version', 'int', 'false', '0'),
++        ('schema_version', 'int', 'false', '0'),
++        ('result_type', 'int', 'false', '0'),
++        ('expect_dimension', 'int', 'false', '0'),
++        ('ret_code', 'int', 'false', '0'),
++        ('trace_id', 'varchar:OB_MAX_ERROR_MSG_LEN', 'true'),
++        ('request_payload', 'longtext', 'true')
++    ]
++)
++
++
+ all_objauth_mysql_def = dict(
+     owner = 'cjl476581',
+     table_name     = '__all_objauth_mysql',
+
+Notes for whoever applies this:
+  1. `OB_MAX_SERVER_NAME_LENGTH` and `OB_MAX_TYPE_NAME_LENGTH`-style constants
+     must be confirmed to exist in src/share/ob_define.h; `OB_MAX_ERROR_MSG_LEN`
+     and `OB_MAX_COLUMN_NAME_LENGTH` are proven in use by
+     __all_vector_index_task (def line 2349-2394) and __all_column (def line
+     316). Replace any unproven constant with a literal length before running
+     the generator.
+  2. Each new system table also needs its `oceanbase.__all_ai_column` /
+     `__all_ai_column_task` read views (the tests query them through
+     `oceanbase.`), modelled on the __all_vector_index_task views at def lines
+     13706 and 13739.  Those view definitions are not included here because
+     they must be generated against the final column list.
+  3. Hidden-column types (state / request / result_spec) are not in this patch;
+     they are created by the DDL path (rootserver/ob_ddl_service.cpp), not by
+     the inner table definition.
