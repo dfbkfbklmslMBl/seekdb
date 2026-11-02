@@ -1,0 +1,100 @@
+### select ai_prompt('{0}/{0}/{1}', json_array(1,true), json_object('k',2))
+!!! 非预期错误 1235: (1235, 'json type is not supported not supported')
+### drop table if exists ai_enhance_prompt
+### create table ai_enhance_prompt(t longtext, a text)
+### insert into ai_enhance_prompt values('{0}-ok', 'lob')
+### select ai_prompt(t, a) from ai_enhance_prompt
+!!! 非预期错误 5083: (5083, 'Invalid data type for the operation')
+### drop table ai_enhance_prompt
+### call DBMS_AI_SERVICE.DROP_AI_MODEL('enhance_complete')
+11118: (11118, "This AI model 'enhance_complete' was not found")
+--- ok（error [0, 11118] 如预期）
+### call DBMS_AI_SERVICE.DROP_AI_MODEL_ENDPOINT('enhance_complete_ep')
+11112: (11112, "This AI model endpoint 'enhance_complete_ep' was not found")
+--- ok（error [0, 11112] 如预期）
+### call DBMS_AI_SERVICE.CREATE_AI_MODEL(   'enhance_complete', '{"type":"completion","model_name":"qwen3-32b"}')
+### call DBMS_AI_SERVICE.CREATE_AI_MODEL_ENDPOINT(   'enhance_complete_ep', '{"ai_model_name":"enhance_complete","scope":"all","url":"http://127.0.0.1:8000/compatible-mode/v1/chat/completions","access_key":"mock-key","provider":"openai"}')
+### select length(ai_complete('enhance_complete', 'hello', null)) > 0 as complete_ok
+!!! 非预期错误 3141: (3141, 'Invalid JSON text in argument.')
+### select length(ai_complete(   'enhance_complete', ai_prompt('describe {0}', json_object('text','你好')),   '{"temperature":0.2,"max_tokens":16}')) > 0 as complete_config_ok
+!!! 非预期错误 1235: (1235, 'json type is not supported not supported')
+### call DBMS_AI_SERVICE.DROP_AI_MODEL('enhance_embed')
+11118: (11118, "This AI model 'enhance_embed' was not found")
+--- ok（error [0, 11118] 如预期）
+### call DBMS_AI_SERVICE.DROP_AI_MODEL_ENDPOINT('enhance_embed_ep')
+11112: (11112, "This AI model endpoint 'enhance_embed_ep' was not found")
+--- ok（error [0, 11112] 如预期）
+### call DBMS_AI_SERVICE.CREATE_AI_MODEL(   'enhance_embed', '{"type":"dense_embedding","model_name":"text-embedding-v1"}')
+### call DBMS_AI_SERVICE.CREATE_AI_MODEL_ENDPOINT(   'enhance_embed_ep', '{"ai_model_name":"enhance_embed","scope":"all","url":"http://127.0.0.1:8000/compatible-mode/v1/embeddings","access_key":"mock-key","provider":"openai"}')
+### select json_length(ai_embed('enhance_embed', 'single-row')) as embed_dimension
+embed_dimension
+768
+(1 行)
+### select json_length(ai_embed('enhance_embed', 'dimension-row', 768)) as requested_dimension
+requested_dimension
+768
+(1 行)
+### drop table if exists ai_enhance_batch
+### create table ai_enhance_batch(id int primary key, content text)
+### insert into ai_enhance_batch values(1,'first'),(2,null),(3,'third')
+### select id, json_length(ai_embed('enhance_embed', content)) as dimension   from ai_enhance_batch order by id
+!!! 非预期错误 1210: (1210, 'Incorrect arguments to ai_embed, model id or content is null')
+### drop table ai_enhance_batch
+### call DBMS_AI_SERVICE.DROP_AI_MODEL('enhance_rerank')
+11118: (11118, "This AI model 'enhance_rerank' was not found")
+--- ok（error [0, 11118] 如预期）
+### call DBMS_AI_SERVICE.DROP_AI_MODEL_ENDPOINT('enhance_rerank_ep')
+11112: (11112, "This AI model endpoint 'enhance_rerank_ep' was not found")
+--- ok（error [0, 11112] 如预期）
+### call DBMS_AI_SERVICE.CREATE_AI_MODEL(   'enhance_rerank', '{"type":"rerank","model_name":"BAAI/bge-reranker-v2-m3"}')
+### call DBMS_AI_SERVICE.CREATE_AI_MODEL_ENDPOINT(   'enhance_rerank_ep', '{"ai_model_name":"enhance_rerank","scope":"all","url":"http://127.0.0.1:8000/v1/rerank","access_key":"mock-key","provider":"siliconflow"}')
+### select json_length(ai_rerank('enhance_rerank','apple',        '["apple","banana","fruit","vegetable"]', null)) as rerank_count
+!!! 非预期错误 1210: (1210, 'Incorrect arguments to ai_rerank, document_array element is not object')
+### select json_unquote(json_extract(r, '$[0].id')) as first_id,        json_length(r) as rerank_count   from (select ai_rerank('enhance_rerank','apple',         '[{"id":"a","text":"apple"},{"id":"b","text":"banana"}]',         'text') as r) x
+first_id	rerank_count
+a	2
+(1 行)
+### call DBMS_AI_SERVICE.DROP_AI_MODEL('enhance_ollama_complete')
+11118: (11118, "This AI model 'enhance_ollama_complete' was not found")
+--- ok（error [0, 11118] 如预期）
+### call DBMS_AI_SERVICE.DROP_AI_MODEL_ENDPOINT('enhance_ollama_complete_ep')
+11112: (11112, "This AI model endpoint 'enhance_ollama_complete_ep' was not found")
+--- ok（error [0, 11112] 如预期）
+### call DBMS_AI_SERVICE.CREATE_AI_MODEL(   'enhance_ollama_complete', '{"type":"completion","model_name":"qwen2.5"}')
+### call DBMS_AI_SERVICE.CREATE_AI_MODEL_ENDPOINT(   'enhance_ollama_complete_ep', '{"ai_model_name":"enhance_ollama_complete","scope":"all","url":"http://127.0.0.1:8000/api/generate","access_key":"","provider":"ollama"}')
+!!! 非预期错误 11114: (11114, "The param 'access_key' is empty or null")
+### select provider from oceanbase.DBA_OB_AI_MODEL_ENDPOINTS  where endpoint_name = 'enhance_ollama_complete_ep'
+provider
+(0 行)
+### call DBMS_AI_SERVICE.ALTER_AI_MODEL_ENDPOINT(   'enhance_ollama_complete_ep', '{"provider":"Ollama"}')
+!!! 非预期错误 11112: (11112, "This AI model endpoint 'enhance_ollama_complete_ep' was not found")
+### select provider from oceanbase.DBA_OB_AI_MODEL_ENDPOINTS  where endpoint_name = 'enhance_ollama_complete_ep'
+provider
+(0 行)
+### select length(ai_complete('enhance_ollama_complete', 'hello')) > 0 as ollama_complete_ok
+!!! 非预期错误 11112: (11112, 'This AI model endpoint is not found')
+### call DBMS_AI_SERVICE.DROP_AI_MODEL('enhance_ollama_embed')
+11118: (11118, "This AI model 'enhance_ollama_embed' was not found")
+--- ok（error [0, 11118] 如预期）
+### call DBMS_AI_SERVICE.DROP_AI_MODEL_ENDPOINT('enhance_ollama_embed_ep')
+11112: (11112, "This AI model endpoint 'enhance_ollama_embed_ep' was not found")
+--- ok（error [0, 11112] 如预期）
+### call DBMS_AI_SERVICE.CREATE_AI_MODEL(   'enhance_ollama_embed', '{"type":"dense_embedding","model_name":"nomic-embed-text"}')
+### call DBMS_AI_SERVICE.CREATE_AI_MODEL_ENDPOINT(   'enhance_ollama_embed_ep', '{"ai_model_name":"enhance_ollama_embed","scope":"all","url":"http://127.0.0.1:8000/api/embed","access_key":"","provider":"OLLAMA"}')
+!!! 非预期错误 11114: (11114, "The param 'access_key' is empty or null")
+### select json_valid(ai_embed('enhance_ollama_embed', 'hello')) as ollama_embed_ok
+ollama_embed_ok
+0
+(1 行)
+### call DBMS_AI_SERVICE.DROP_AI_MODEL('enhance_complete')
+### call DBMS_AI_SERVICE.DROP_AI_MODEL_ENDPOINT('enhance_complete_ep')
+### call DBMS_AI_SERVICE.DROP_AI_MODEL('enhance_embed')
+### call DBMS_AI_SERVICE.DROP_AI_MODEL_ENDPOINT('enhance_embed_ep')
+### call DBMS_AI_SERVICE.DROP_AI_MODEL('enhance_rerank')
+### call DBMS_AI_SERVICE.DROP_AI_MODEL_ENDPOINT('enhance_rerank_ep')
+### call DBMS_AI_SERVICE.DROP_AI_MODEL('enhance_ollama_complete')
+### call DBMS_AI_SERVICE.DROP_AI_MODEL_ENDPOINT('enhance_ollama_complete_ep')
+!!! 非预期错误 11112: (11112, "This AI model endpoint 'enhance_ollama_complete_ep' was not found")
+### call DBMS_AI_SERVICE.DROP_AI_MODEL('enhance_ollama_embed')
+### call DBMS_AI_SERVICE.DROP_AI_MODEL_ENDPOINT('enhance_ollama_embed_ep')
+!!! 非预期错误 11112: (11112, "This AI model endpoint 'enhance_ollama_embed_ep' was not found")

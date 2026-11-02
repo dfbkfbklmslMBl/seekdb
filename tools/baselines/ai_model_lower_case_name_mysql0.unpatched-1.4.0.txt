@@ -1,0 +1,39 @@
+### let $__tenant_name__ = 'sys'
+!!! 非预期错误 1064: (1064, "You have an error in your SQL syntax; check the manual that corresponds to your OceanBase version for the right syntax to use near 'let $__tenant_name__ = 'sys'' at line 1")
+### call DBMS_AI_SERVICE.DROP_AI_MODEL('cafe')
+11118: (11118, "This AI model 'cafe' was not found")
+--- ok（error [0, 11118] 如预期）
+### call DBMS_AI_SERVICE.DROP_AI_MODEL('CAFE')
+11118: (11118, "This AI model 'CAFE' was not found")
+--- ok（error [0, 11118] 如预期）
+### call DBMS_AI_SERVICE.DROP_AI_MODEL('café')
+11118: (11118, "This AI model 'café' was not found")
+--- ok（error [0, 11118] 如预期）
+### call DBMS_AI_SERVICE.CREATE_AI_MODEL(   'cafe', '{     "type": "dense_embedding",     "model_name": "text-embedding-v1"   }')
+### select NAME, TYPE, MODEL_NAME from oceanbase.DBA_OB_AI_MODELS where NAME in ('cafe', 'CAFE', 'café')
+NAME	TYPE	MODEL_NAME
+cafe	DENSE_EMBEDDING	text-embedding-v1
+(1 行)
+### call DBMS_AI_SERVICE.CREATE_AI_MODEL(   'café', '{     "type": "dense_embedding",     "model_name": "text-embedding-v2"   }')
+11119: (11119, "This ai model 'café' is already exists")
+--- ok（error [11119] 如预期）
+### select NAME, TYPE, MODEL_NAME from oceanbase.DBA_OB_AI_MODELS where NAME in ('cafe', 'CAFE', 'café')
+NAME	TYPE	MODEL_NAME
+cafe	DENSE_EMBEDDING	text-embedding-v1
+(1 行)
+### call DBMS_AI_SERVICE.DROP_AI_MODEL('CAFE')
+### select NAME, TYPE, MODEL_NAME from oceanbase.DBA_OB_AI_MODELS where NAME in ('cafe', 'CAFE', 'café')
+NAME	TYPE	MODEL_NAME
+(0 行)
+### call DBMS_AI_SERVICE.DROP_AI_MODEL('cafe')
+11118: (11118, "This AI model 'cafe' was not found")
+--- ok（error [11118] 如预期）
+### select NAME, TYPE, MODEL_NAME from oceanbase.DBA_OB_AI_MODELS where NAME in ('cafe', 'CAFE', 'café')
+NAME	TYPE	MODEL_NAME
+(0 行)
+### call DBMS_AI_SERVICE.DROP_AI_MODEL('café')
+11118: (11118, "This AI model 'café' was not found")
+--- ok（error [11118] 如预期）
+### select NAME, TYPE, MODEL_NAME from oceanbase.DBA_OB_AI_MODELS where NAME in ('cafe', 'CAFE', 'café')
+NAME	TYPE	MODEL_NAME
+(0 行)

@@ -67,3 +67,22 @@ python mysqltest-lite.py --host <h> --port <p> --test ai_function_enhancement.12
   正好覆盖全部实测缺口，**没有多余补丁，也没有没补丁的缺口**。
 - 修掉的假红来源：mysqltest 里 `--error 0, 11118` 的 **0 表示允许成功**，
   runner 原先把成功当失败，会让 DROP-if-exists 类语句全红（这一版把 20 处降到 12 处）。
+
+## tools/baselines/ —— 七个官方套件在**未打补丁 seekdb 1.4.0** 上的基线
+每个文件是一份转录（SQL → 返回行 / 错误码），全部由 `mysqltest-lite.py` + `mock_ai_service.py` 产出。
+汇总（只列「非预期错误」的错误码集合；这些套件里 **只有 ai_function_enhancement 是赛题一的靶子**）：
+
+| 套件 | 非预期错误码 | 怎么解读 |
+| --- | --- | --- |
+| `ai_function_enhancement` | 1235 5083 3141 1210 11114 (+11112 级联) | **就是那 5 份补丁的靶子**，见 tools/README 上方对照表 |
+| `ai_prompt` | 1235 5083 | 同一个 json/LOB 缺口的另一面 ⇒ 补丁 01 会同时修它 |
+| `ai_model_ddl` | 11118 11119 | **与补丁无关**：1.4.0 与判分支的 AI 模型 DDL/校验存在漂移 |
+| `ai_model_endpoint_ddl` | 1054 11112 11113 11115 | 同上，且 `1054 Unknown column` 提示 **DBA 视图列名在两个版本间不同** |
+| `ai_model_lower_case_name_mysql0` | 1064 | 语法层差异（判分支有、1.4.0 无，或反过来） |
+| `ai_model_lower_case_name_mysql1` | 无 | 干净 |
+| `file_sql_basic` | 1064 1193 | 赛题二：语法 + sysvar 全缺，见 §26 |
+
+⚠️ **必须带着走的告诫**：本机可用的最新引擎是 **1.4.0（pylibseekdb 起）**，而判分跑的是
+`2026-competition` 分支自编的产物。**三个套件报出的错误码与五份补丁毫无关系，说明两者并不等价。**
+所以这些转录的正确用法是**回归下限**（补丁打上后不得比这里更红）与**缺口形状线索**，
+**不能**当作「在判分环境里的通过/失败」。云上要用 `mysqltest-lite.py` 打在**自己编出来的二进制**上重新取一遍基线。

@@ -1,0 +1,134 @@
+### call DBMS_AI_SERVICE.DROP_AI_MODEL_ENDPOINT('my_model_endpoint1')
+11112: (11112, "This AI model endpoint 'my_model_endpoint1' was not found")
+--- ok（error [0, 11112] 如预期）
+### call DBMS_AI_SERVICE.DROP_AI_MODEL_ENDPOINT('my_model_endpoint2')
+11112: (11112, "This AI model endpoint 'my_model_endpoint2' was not found")
+--- ok（error [0, 11112] 如预期）
+### call DBMS_AI_SERVICE.DROP_AI_MODEL_ENDPOINT('my_model_endpoint3')
+11112: (11112, "This AI model endpoint 'my_model_endpoint3' was not found")
+--- ok（error [0, 11112] 如预期）
+### call DBMS_AI_SERVICE.DROP_AI_MODEL_ENDPOINT('my_model_endpoint4')
+11112: (11112, "This AI model endpoint 'my_model_endpoint4' was not found")
+--- ok（error [0, 11112] 如预期）
+### call DBMS_AI_SERVICE.DROP_AI_MODEL ('my_model1')
+11118: (11118, "This AI model 'my_model1' was not found")
+--- ok（error [0, 11118] 如预期）
+### call DBMS_AI_SERVICE.DROP_AI_MODEL ('my_model3')
+11118: (11118, "This AI model 'my_model3' was not found")
+--- ok（error [0, 11118] 如预期）
+### call DBMS_AI_SERVICE.DROP_AI_MODEL ('my_model4')
+11118: (11118, "This AI model 'my_model4' was not found")
+--- ok（error [0, 11118] 如预期）
+### call DBMS_AI_SERVICE.CREATE_AI_MODEL( 'my_model1', '{     "type": "completion",     "model_name": "qwen-plus"  }')
+### call DBMS_AI_SERVICE.CREATE_AI_MODEL( 'my_model3', '{     "type": "completion",     "model_name": "qwen-plus"  }')
+### call DBMS_AI_SERVICE.CREATE_AI_MODEL( 'my_model4', '{     "type": "completion",     "model_name": "qwen-plus"  }')
+### call DBMS_AI_SERVICE.CREATE_AI_MODEL_ENDPOINT (   'my_model_endpoint1', '{     "ai_model_name": "my_model1",     "url": "https://www.baidu.com/",     "access_key": "sk-xxxxxxxxxxxx",     "request_model_name": "text-embedding-v2",     "provider": "openai",     "max_concurrency": 3   }')
+!!! 非预期错误 11115: (11115, "The param 'max_concurrency' is invalid")
+### select ENDPOINT_NAME, AI_MODEL_NAME, URL, ACCESS_KEY = 'sk-xxxxxxxxxxxx', PROVIDER, REQUEST_MODEL_NAME, PARAMETERS, REQUEST_TRANSFORM_FN, RESPONSE_TRANSFORM_FN, MAX_CONCURRENCY from oceanbase.DBA_OB_AI_MODEL_ENDPOINTS where ENDPOINT_NAME = 'my_model_endpoint1'
+!!! 非预期错误 1054: (1054, "Unknown column 'MAX_CONCURRENCY' in 'field list'")
+### call DBMS_AI_SERVICE.CREATE_AI_MODEL_ENDPOINT (   'my_model_endpoint2', '{     "ai_model_name": "my_model1",     "url": "https://www.baidu.com/",     "access_key": "sk-xxxxxxxxxxxx",     "request_model_name": "text-embedding-v2",     "provider": "openai"   }')
+(期望错误 [11113]，实际无错误，返回 0 行)
+!!! FAIL 期望 error [11113]，实际 no error
+### select ENDPOINT_NAME, AI_MODEL_NAME, URL, ACCESS_KEY = 'sk-xxxxxxxxxxxx', PROVIDER, REQUEST_MODEL_NAME, PARAMETERS, REQUEST_TRANSFORM_FN, RESPONSE_TRANSFORM_FN from oceanbase.DBA_OB_AI_MODEL_ENDPOINTS where ENDPOINT_NAME = 'my_model_endpoint2'
+ENDPOINT_NAME	AI_MODEL_NAME	URL	ACCESS_KEY = 'sk-xxxxxxxxxxxx'	PROVIDER	REQUEST_MODEL_NAME	PARAMETERS	REQUEST_TRANSFORM_FN	RESPONSE_TRANSFORM_FN
+my_model_endpoint2	my_model1	https://www.baidu.com/	1	openai	text-embedding-v2	NULL	NULL	NULL
+(1 行)
+### call DBMS_AI_SERVICE.CREATE_AI_MODEL_ENDPOINT (   'my_model_endpoint1', '{     "ai_model_name": "my_model1",     "url": "https://www.baidu.com/",     "access_key": "sk-xxxxxxxxxxxx",     "request_model_name": "text-embedding-v2",     "provider": "openai"   }')
+11113: (11113, "The ai model endpoint 'my_model_endpoint2' has the same ai model name 'my_model1'")
+--- ok（error [11113] 如预期）
+### call DBMS_AI_SERVICE.CREATE_AI_MODEL_ENDPOINT (   'my_model_endpoint3', '{     "ai_model_name": "my_model1",     "url": "https://www.baidu.com/",     "access_key": "sk-xxxxxxxxxxxx",     "request_transform_fn": "text_embedding_request_fn",     "response_transform_fn": "text_embedding_reponse_fn"   }')
+11114: (11114, "The param 'provider' is empty or null")
+--- ok（error [11114] 如预期）
+### select ENDPOINT_NAME, AI_MODEL_NAME, URL, ACCESS_KEY = 'sk-xxxxxxxxxxxx', PROVIDER, REQUEST_MODEL_NAME, PARAMETERS, REQUEST_TRANSFORM_FN, RESPONSE_TRANSFORM_FN from oceanbase.DBA_OB_AI_MODEL_ENDPOINTS where ENDPOINT_NAME = 'my_model_endpoint3'
+ENDPOINT_NAME	AI_MODEL_NAME	URL	ACCESS_KEY = 'sk-xxxxxxxxxxxx'	PROVIDER	REQUEST_MODEL_NAME	PARAMETERS	REQUEST_TRANSFORM_FN	RESPONSE_TRANSFORM_FN
+(0 行)
+### call DBMS_AI_SERVICE.ALTER_AI_MODEL_ENDPOINT (   'my_model_endpoint1', '{     "provider" : "aliyun-openai",     "max_concurrency": 7   }')
+!!! 非预期错误 11112: (11112, "This AI model endpoint 'my_model_endpoint1' was not found")
+### select ENDPOINT_NAME, AI_MODEL_NAME, URL, ACCESS_KEY = 'sk-xxxxxxxxxxxx', PROVIDER, REQUEST_MODEL_NAME, PARAMETERS, REQUEST_TRANSFORM_FN, RESPONSE_TRANSFORM_FN, MAX_CONCURRENCY from oceanbase.DBA_OB_AI_MODEL_ENDPOINTS where ENDPOINT_NAME = 'my_model_endpoint1'
+!!! 非预期错误 1054: (1054, "Unknown column 'MAX_CONCURRENCY' in 'field list'")
+### call DBMS_AI_SERVICE.ALTER_AI_MODEL_ENDPOINT (   'my_model_endpoint1', '{     "max_concurrency": 0   }')
+11112: (11112, "This AI model endpoint 'my_model_endpoint1' was not found")
+!!! FAIL 期望 error [11116]，实际 11112: (11112, "This AI model endpoint 'my_model_endpoint1' was not found")
+### call DBMS_AI_SERVICE.ALTER_AI_MODEL_ENDPOINT (   'my_model_endpoint1', '{     "max_concurrency": 1025   }')
+11112: (11112, "This AI model endpoint 'my_model_endpoint1' was not found")
+!!! FAIL 期望 error [11116]，实际 11112: (11112, "This AI model endpoint 'my_model_endpoint1' was not found")
+### call DBMS_AI_SERVICE.ALTER_AI_MODEL_ENDPOINT (   'my_model_endpoint1', '{     "max_concurrency": "8"   }')
+11112: (11112, "This AI model endpoint 'my_model_endpoint1' was not found")
+!!! FAIL 期望 error [11116]，实际 11112: (11112, "This AI model endpoint 'my_model_endpoint1' was not found")
+### select ENDPOINT_NAME, MAX_CONCURRENCY from oceanbase.DBA_OB_AI_MODEL_ENDPOINTS where ENDPOINT_NAME = 'my_model_endpoint1'
+!!! 非预期错误 1054: (1054, "Unknown column 'MAX_CONCURRENCY' in 'field list'")
+### call DBMS_AI_SERVICE.ALTER_AI_MODEL_ENDPOINT (   'my_model_endpoint1', '{     "url" : "https://www.baidu.com/"   }')
+!!! 非预期错误 11112: (11112, "This AI model endpoint 'my_model_endpoint1' was not found")
+### select ENDPOINT_NAME, AI_MODEL_NAME, URL, ACCESS_KEY = 'sk-xxxxxxxxxxxx', PROVIDER, REQUEST_MODEL_NAME, PARAMETERS, REQUEST_TRANSFORM_FN, RESPONSE_TRANSFORM_FN from oceanbase.DBA_OB_AI_MODEL_ENDPOINTS where ENDPOINT_NAME = 'my_model_endpoint1'
+ENDPOINT_NAME	AI_MODEL_NAME	URL	ACCESS_KEY = 'sk-xxxxxxxxxxxx'	PROVIDER	REQUEST_MODEL_NAME	PARAMETERS	REQUEST_TRANSFORM_FN	RESPONSE_TRANSFORM_FN
+(0 行)
+### call DBMS_AI_SERVICE.ALTER_AI_MODEL_ENDPOINT (   'my_model_endpoint1', '{     "access_key" : "sk2-xxxxxxxxxxxx"   }')
+!!! 非预期错误 11112: (11112, "This AI model endpoint 'my_model_endpoint1' was not found")
+### select ENDPOINT_NAME, AI_MODEL_NAME, URL, ACCESS_KEY = 'sk2-xxxxxxxxxxxx', PROVIDER, REQUEST_MODEL_NAME, PARAMETERS, REQUEST_TRANSFORM_FN, RESPONSE_TRANSFORM_FN from oceanbase.DBA_OB_AI_MODEL_ENDPOINTS where ENDPOINT_NAME = 'my_model_endpoint1'
+ENDPOINT_NAME	AI_MODEL_NAME	URL	ACCESS_KEY = 'sk2-xxxxxxxxxxxx'	PROVIDER	REQUEST_MODEL_NAME	PARAMETERS	REQUEST_TRANSFORM_FN	RESPONSE_TRANSFORM_FN
+(0 行)
+### call DBMS_AI_SERVICE.ALTER_AI_MODEL_ENDPOINT (   'my_model_endpoint1', '{     "ai_model_name" : "my_model_3"   }')
+11112: (11112, "This AI model endpoint 'my_model_endpoint1' was not found")
+!!! FAIL 期望 error [11116]，实际 11112: (11112, "This AI model endpoint 'my_model_endpoint1' was not found")
+### select ENDPOINT_NAME, AI_MODEL_NAME, URL, ACCESS_KEY = 'sk2-xxxxxxxxxxxx', PROVIDER, REQUEST_MODEL_NAME, PARAMETERS, REQUEST_TRANSFORM_FN, RESPONSE_TRANSFORM_FN from oceanbase.DBA_OB_AI_MODEL_ENDPOINTS where ENDPOINT_NAME = 'my_model_endpoint1'
+ENDPOINT_NAME	AI_MODEL_NAME	URL	ACCESS_KEY = 'sk2-xxxxxxxxxxxx'	PROVIDER	REQUEST_MODEL_NAME	PARAMETERS	REQUEST_TRANSFORM_FN	RESPONSE_TRANSFORM_FN
+(0 行)
+### call DBMS_AI_SERVICE.ALTER_AI_MODEL_ENDPOINT (   'my_model_endpoint1', '{     "provider" : "",     "request_transform_fn": "text_embedding_request_fn",     "response_transform_fn": "text_embedding_reponse_fn"   }')
+11112: (11112, "This AI model endpoint 'my_model_endpoint1' was not found")
+!!! FAIL 期望 error [11114]，实际 11112: (11112, "This AI model endpoint 'my_model_endpoint1' was not found")
+### select ENDPOINT_NAME, AI_MODEL_NAME, URL, ACCESS_KEY = 'sk2-xxxxxxxxxxxx', PROVIDER, REQUEST_MODEL_NAME, PARAMETERS, REQUEST_TRANSFORM_FN, RESPONSE_TRANSFORM_FN from oceanbase.DBA_OB_AI_MODEL_ENDPOINTS where ENDPOINT_NAME = 'my_model_endpoint1'
+ENDPOINT_NAME	AI_MODEL_NAME	URL	ACCESS_KEY = 'sk2-xxxxxxxxxxxx'	PROVIDER	REQUEST_MODEL_NAME	PARAMETERS	REQUEST_TRANSFORM_FN	RESPONSE_TRANSFORM_FN
+(0 行)
+### call DBMS_AI_SERVICE.ALTER_AI_MODEL_ENDPOINT (   'my_model_endpoint4', '{     "ai_model_name" : "my_model3"   }')
+11112: (11112, "This AI model endpoint 'my_model_endpoint4' was not found")
+--- ok（error [11112] 如预期）
+### call DBMS_AI_SERVICE.DROP_AI_MODEL_ENDPOINT('my_model_endpoint1')
+!!! 非预期错误 11112: (11112, "This AI model endpoint 'my_model_endpoint1' was not found")
+### call DBMS_AI_SERVICE.DROP_AI_MODEL_ENDPOINT('my_model_endpoint4')
+11112: (11112, "This AI model endpoint 'my_model_endpoint4' was not found")
+--- ok（error [0, 11112] 如预期）
+### call DBMS_AI_SERVICE.CREATE_AI_MODEL_ENDPOINT (   'my_model_endpoint4', '{     "ai_model_name": "my_model4",     "url": "https://www.baidu.com/",     "access_key": "sk-xxxxxxxxxxxx",     "request_model_name": "text-embedding-v2",     "provider": "openai"   }')
+### select ENDPOINT_NAME, AI_MODEL_NAME, URL, ACCESS_KEY = 'sk-xxxxxxxxxxxx', PROVIDER, REQUEST_MODEL_NAME, PARAMETERS, REQUEST_TRANSFORM_FN, RESPONSE_TRANSFORM_FN from oceanbase.DBA_OB_AI_MODEL_ENDPOINTS where ENDPOINT_NAME in('my_model_endpoint2', 'my_model_endpoint4')
+ENDPOINT_NAME	AI_MODEL_NAME	URL	ACCESS_KEY = 'sk-xxxxxxxxxxxx'	PROVIDER	REQUEST_MODEL_NAME	PARAMETERS	REQUEST_TRANSFORM_FN	RESPONSE_TRANSFORM_FN
+my_model_endpoint2	my_model1	https://www.baidu.com/	1	openai	text-embedding-v2	NULL	NULL	NULL
+my_model_endpoint4	my_model4	https://www.baidu.com/	1	openai	text-embedding-v2	NULL	NULL	NULL
+(2 行)
+### call DBMS_AI_SERVICE.DROP_AI_MODEL_ENDPOINT('my_model_endpoint4')
+### call DBMS_AI_SERVICE.DROP_AI_MODEL_ENDPOINT('my_model_endpoint2')
+(期望错误 [11112]，实际无错误，返回 0 行)
+!!! FAIL 期望 error [11112]，实际 no error
+### call DBMS_AI_SERVICE.DROP_AI_MODEL_ENDPOINT('my_model_endpoint3')
+11112: (11112, "This AI model endpoint 'my_model_endpoint3' was not found")
+--- ok（error [11112] 如预期）
+### call DBMS_AI_SERVICE.DROP_AI_MODEL_ENDPOINT('')
+11114: (11114, "The param 'name' is empty or null")
+--- ok（error [11114] 如预期）
+### call DBMS_AI_SERVICE.DROP_AI_MODEL_ENDPOINT('user_ai_model_endpoint_1')
+11112: (11112, "This AI model endpoint 'user_ai_model_endpoint_1' was not found")
+--- ok（error [0, 11112] 如预期）
+### DROP USER IF EXISTS test_ai_user@'%'
+### CREATE USER test_ai_user@'%' IDENTIFIED BY '123456'
+### GRANT SELECT ON test.* TO 'test_ai_user'@'%'
+### SHOW GRANTS FOR test_ai_user@'%'
+Grants for test_ai_user@%
+GRANT USAGE ON *.* TO 'test_ai_user'
+GRANT SELECT ON `test`.* TO 'test_ai_user'
+(2 行)
+### call DBMS_AI_SERVICE.CREATE_AI_MODEL_ENDPOINT (   'user_ai_model_endpoint_1', '{     "ai_model_name": "my_model1",     "url": "https://www.baidu.com/",     "access_key": "sk-xxxxxxxxxxxx",     "request_model_name": "text-embedding-v2",     "provider": "openai"   }')
+(期望错误 [1227]，实际无错误，返回 0 行)
+!!! FAIL 期望 error [1227]，实际 no error
+### GRANT CREATE AI MODEL ON *.* TO test_ai_user@'%'
+### call DBMS_AI_SERVICE.CREATE_AI_MODEL_ENDPOINT (   'user_ai_model_endpoint_1', '{     "ai_model_name": "my_model1",     "url": "https://www.baidu.com/",     "access_key": "sk-xxxxxxxxxxxx",     "request_model_name": "text-embedding-v2",     "provider": "openai"   }')
+!!! 非预期错误 11113: (11113, "This ai model endpoint 'user_ai_model_endpoint_1' is already exists")
+### call DBMS_AI_SERVICE.ALTER_AI_MODEL_ENDPOINT (   'user_ai_model_endpoint_1', '{     "provider" : "aliyun-openai"   }')
+(期望错误 [1227]，实际无错误，返回 0 行)
+!!! FAIL 期望 error [1227]，实际 no error
+### GRANT ALTER AI MODEL ON *.* TO test_ai_user@'%'
+### call DBMS_AI_SERVICE.ALTER_AI_MODEL_ENDPOINT (   'user_ai_model_endpoint_1', '{     "provider" : "aliyun-openai"   }')
+### call DBMS_AI_SERVICE.DROP_AI_MODEL_ENDPOINT('user_ai_model_endpoint_1')
+(期望错误 [1227]，实际无错误，返回 0 行)
+!!! FAIL 期望 error [1227]，实际 no error
+### GRANT DROP AI MODEL ON *.* TO test_ai_user@'%'
+### call DBMS_AI_SERVICE.DROP_AI_MODEL_ENDPOINT('user_ai_model_endpoint_1')
+!!! 非预期错误 11112: (11112, "This AI model endpoint 'user_ai_model_endpoint_1' was not found")
+### DROP USER test_ai_user@'%'
