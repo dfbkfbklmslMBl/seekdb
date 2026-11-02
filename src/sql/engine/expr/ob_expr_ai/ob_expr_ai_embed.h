@@ -37,11 +37,26 @@ public:
                                 int64_t param_num,
                                 common::ObExprTypeCtx &type_ctx) const override;
   static int eval_ai_embed(const ObExpr &expr, ObEvalCtx &ctx, ObDatum &res);
+  static int eval_ai_embed_batch(const ObExpr &expr, ObEvalCtx &ctx,
+                                 const ObBitVector &skip, const int64_t batch_size);
   virtual int cg_expr(ObExprCGCtx &expr_cg_ctx, 
                       const ObRawExpr &raw_expr,
                       ObExpr &rt_expr) const override;
   virtual bool need_rt_ctx() const override { return true; }
 private:
+  // the single row semantics, shared by the row-at-a-time path and by every row the batched path
+  // cannot answer, so an invalid or unserved input reports exactly what it reported before
+  static int eval_one_row(const ObExpr &expr, ObEvalCtx &ctx, ObDatum &res,
+                          common::ObDatum &model_id_datum, common::ObDatum &content_datum,
+                          common::ObDatum *dim_datum, MultimodeAlloctor &temp_allocator);
+  // one multi-input request for the rows of a chunk; vectors keeps the chunk's input order
+  static int request_batch(const ObString &model_id, common::ObArray<ObString> &contents,
+                           const int64_t dim, MultimodeAlloctor &temp_allocator,
+                           common::ObArray<ObString> &vectors);
+  static bool is_batchable_row(const common::ObDatum &model_id_datum,
+                               const common::ObDatum &content_datum,
+                               const common::ObDatum *dim_datum);
+  static int64_t row_dim(const common::ObDatum *dim_datum);
   static constexpr int MODEL_IDX = 0;
   static constexpr int CONTENT_IDX = 1;
   static constexpr int DIM_IDX = 2;
