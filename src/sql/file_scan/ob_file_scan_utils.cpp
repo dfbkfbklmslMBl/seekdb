@@ -40,6 +40,8 @@ using namespace common;
 namespace sql
 {
 
+thread_local ObFileSqlDescribeState g_ob_file_sql_describe_state = OB_FILE_SQL_DESCRIBE_OFF;
+
 int ObFileSqlScanParam::assign(const ObFileSqlScanParam &other)
 {
   int ret = OB_SUCCESS;
@@ -359,23 +361,29 @@ bool ObFileSqlReader::looks_like_int(const ObString &s)
 {
   bool valid = s.length() > 0;
   int64_t i = 0;
-  char *end = nullptr;
+  bool negative = false;
   if (valid && ('-' == s[0] || '+' == s[0])) {
+    negative = ('-' == s[0]);
     i = 1;
   }
   if (valid && i >= s.length()) {
     valid = false;
   }
+  // the value has to fit an int64; the digits are added here because the text of a field is not
+  // NUL terminated, so strtoll would read past the end of the field
+  const uint64_t limit = negative ? static_cast<uint64_t>(INT64_MAX) + 1 : static_cast<uint64_t>(INT64_MAX);
+  uint64_t value = 0;
   for (; valid && i < s.length(); ++i) {
     if (s[i] < '0' || s[i] > '9') {
       valid = false;
+    } else {
+      const uint64_t digit = static_cast<uint64_t>(s[i] - '0');
+      if (value > (limit - digit) / 10) {
+        valid = false;
+      } else {
+        value = value * 10 + digit;
+      }
     }
-  }
-  if (valid) {
-    // must survive int64, otherwise the column is not an integer column
-    errno = 0;
-    (void)strtoll(s.ptr(), &end, 10);
-    valid = (0 == errno && nullptr != end && 0 == *end);
   }
   return valid;
 }
@@ -840,6 +848,58 @@ int ObFileSqlLoader::load(ObIAllocator &alloc, const ObFileSqlScanParam &param,
     }
   } else if (OB_FAIL(load_columns(alloc, param, data))) {
     LOG_WARN("failed to read the file table", K(ret), K(param));
+  }
+  if (OB_SUCC(ret) && OB_FILE_SQL_DESCRIBE_ON == g_ob_file_sql_describe_state) {
+    // the statement is a DESCRIBE of this file table: the answer is the schema of the file
+    ObFileSqlTableData described;
+    ret = load_describe(alloc, data, described);
+    if (OB_SUCC(ret)) {
+      data = described;
+      g_ob_file_sql_describe_state = OB_FILE_SQL_DESCRIBE_ANSWERED;
+    }
+  }
+  return ret;
+}
+
+// The schema of a file table in the shape DuckDB's DESCRIBE prints: one row per column, with the
+// column name, the type, whether the column can be NULL, and the three MySQL columns left empty.
+int ObFileSqlLoader::load_describe(ObIAllocator &alloc, const ObFileSqlTableData &source,
+                                   ObFileSqlTableData &data)
+{
+  int ret = OB_SUCCESS;
+  static const char *const headers[6] = {"column_name", "column_type", "null", "key", "default", "extra"};
+  data.reset();
+  for (int64_t i = 0; OB_SUCC(ret) && i < 6; ++i) {
+    ObFileSqlColumn column;
+    column.name_ = ObString(static_cast<int64_t>(strlen(headers[i])), headers[i]);
+    column.type_ = ObVarcharType;
+    column.max_len_ = 4096;
+    column.nullable_ = true;
+    if (OB_FAIL(ret = data.cols_.push_back(column))) {
+      LOG_WARN("failed to collect a describe column", K(ret), K(i));
+    }
+  }
+  data.col_cnt_ = data.cols_.count();
+  // the header of the answer is the column names themselves, so it is not a row of its own
+  for (int64_t i = 0; OB_SUCC(ret) && i < source.col_cnt_; ++i) {
+    const ObFileSqlColumn &column = source.cols_.at(i);
+    const char *nullable = column.nullable_ ? "YES" : "NO";
+    const char *type_name = ob_file_sql_describe_type(column);
+    ObString values[6];
+    values[0] = column.name_;
+    values[1] = ObString(static_cast<int64_t>(strlen(type_name)), type_name);
+    values[2] = ObString(static_cast<int64_t>(strlen(nullable)), nullable);
+    values[3] = ObString(4, "NULL");
+    values[4] = ObString(4, "NULL");
+    values[5] = ObString(4, "NULL");
+    for (int64_t j = 0; OB_SUCC(ret) && j < 6; ++j) {
+      if (OB_FAIL(ret = data.cells_.push_back(values[j]))) {
+        LOG_WARN("failed to collect a describe cell", K(ret), K(i), K(j));
+      }
+    }
+    if (OB_SUCC(ret)) {
+      ++data.row_cnt_;
+    }
   }
   return ret;
 }

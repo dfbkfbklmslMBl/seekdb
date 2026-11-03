@@ -17,6 +17,7 @@
 #define USING_LOG_PREFIX SQL_RESV
 #include "sql/resolver/ddl/ob_explain_resolver.h"
 #include "sql/resolver/ob_resolver.h"
+#include "sql/file_scan/ob_file_scan_utils.h"
 
 using namespace oceanbase;
 using namespace sql;
@@ -26,11 +27,12 @@ const static int64_t EXPLAIN_DISPLAY_OPTION = 1;
 const static int64_t EXPLAIN_INTO_TABLE = 2;
 const static int64_t EXPLAIN_STMT_ID = 3;
 const static int64_t EXPLAIN_CHILD_STMT = 4;
+const static int64_t EXPLAIN_IS_DESCRIBE = 5;
 int ObExplainResolver::resolve(const ParseNode &parse_tree)
 {
   int ret = OB_SUCCESS;
   ObExplainStmt *explain_stmt = NULL;
-  if (!(T_EXPLAIN == parse_tree.type_  && 5 == parse_tree.num_child_)) {
+  if (!(T_EXPLAIN == parse_tree.type_  && 6 == parse_tree.num_child_)) {
     ret = OB_ERR_UNEXPECTED;
     LOG_WARN("invalid EXPLAIN syntax",
              "type", parse_tree.type_,
@@ -40,6 +42,9 @@ int ObExplainResolver::resolve(const ParseNode &parse_tree)
     LOG_WARN("failed to create explain stmt");
   } else {
     ParseNode *child_node = parse_tree.children_[EXPLAIN_CHILD_STMT];
+    // the DESCRIBE of a file table answers with the schema of the file, so the file table has to
+    // know that the statement it belongs to is a DESCRIBE and not an EXPLAIN
+    const bool is_describe = NULL != parse_tree.children_[EXPLAIN_IS_DESCRIBE];
     ObStmt *child_stmt = NULL;
     ObExplainDisplayOpt opt;
     opt.with_tree_line_ = true;
@@ -56,10 +61,19 @@ int ObExplainResolver::resolve(const ParseNode &parse_tree)
       LOG_USER_ERROR(OB_NOT_SUPPORTED, "stmt type for EXPLAIN");
     } else {
       ObResolver resolver(params_);
+      if (is_describe) {
+        g_ob_file_sql_describe_state = OB_FILE_SQL_DESCRIBE_ON;
+      }
       if (OB_FAIL(resolver.resolve(ObResolver::IS_NOT_PREPARED_STMT,
                                    *child_node,
                                    child_stmt))) {
+        if (is_describe) {
+          g_ob_file_sql_describe_state = OB_FILE_SQL_DESCRIBE_OFF;
+        }
       } else if (OB_ISNULL(child_stmt)) {
+        if (is_describe) {
+          g_ob_file_sql_describe_state = OB_FILE_SQL_DESCRIBE_OFF;
+        }
         ret = OB_ERR_UNEXPECTED;
         LOG_WARN("failed to generate stmt for child stmt");
       } else {
@@ -140,6 +154,14 @@ int ObExplainResolver::resolve(const ParseNode &parse_tree)
     if (OB_SUCC(ret) && NULL != statement_id_node) {
       ObString statement_id(statement_id_node->str_len_, statement_id_node->str_value_);
       explain_stmt->set_statement_id(statement_id);
+    }
+    if (OB_SUCC(ret) && is_describe) {
+      if (OB_FILE_SQL_DESCRIBE_ANSWERED == g_ob_file_sql_describe_state) {
+        // the file table already turned the statement into the schema of the file, so the answer
+        // is the query itself and not a plan
+        stmt_ = child_stmt;
+      }
+      g_ob_file_sql_describe_state = OB_FILE_SQL_DESCRIBE_OFF;
     }
   }
 

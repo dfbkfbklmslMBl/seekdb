@@ -50,8 +50,8 @@
   if (0 != display_type) { \
     malloc_terminal_node(display_node, result->malloc_pool_, display_type); \
   } \
-  malloc_non_terminal_node(explain_stmt, result->malloc_pool_, T_EXPLAIN, 5, \
-                           type_node, display_node, into_table, set_statement_id, stmt);
+  malloc_non_terminal_node(explain_stmt, result->malloc_pool_, T_EXPLAIN, 6, \
+                           type_node, display_node, into_table, set_statement_id, stmt, (no_use));
 %}
 
 %destructor {destroy_tree($$);}<node>
@@ -12308,14 +12308,28 @@ explain_or_desc relation_factor opt_desc_column_option
 | explain_or_desc FORMAT COMP_EQ format_name explainable_stmt
 {
   (void)($1);
-  malloc_non_terminal_node($$, result->malloc_pool_, T_EXPLAIN, 5, $4, NULL, NULL, NULL, $5);
+  malloc_non_terminal_node($$, result->malloc_pool_, T_EXPLAIN, 6, $4, NULL, NULL, NULL, $5, $1);
 }
 ;
 
+/* The DESCRIBE of a file table answers with the schema of the file instead of a plan, so the
+ * keyword has to survive the parse: EXPLAIN leaves the marker empty, DESCRIBE and DESC set it. */
 explain_or_desc:
 EXPLAIN {$$ = NULL;}
-| DESCRIBE {$$ = NULL;}
-| DESC  {$$ = NULL;}
+| DESCRIBE
+{
+  ParseNode *describe_node = NULL;
+  malloc_terminal_node(describe_node, result->malloc_pool_, T_INT);
+  describe_node->value_ = 1;
+  $$ = describe_node;
+}
+| DESC
+{
+  ParseNode *describe_node = NULL;
+  malloc_terminal_node(describe_node, result->malloc_pool_, T_INT);
+  describe_node->value_ = 1;
+  $$ = describe_node;
+}
 ;
 
 explainable_stmt:

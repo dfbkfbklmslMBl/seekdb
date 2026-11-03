@@ -211,6 +211,19 @@ int ob_file_sql_dedup_column_names(common::ObIArray<ObFileSqlColumn> &cols,
 int ob_file_sql_cell_to_obj(const common::ObString &text, const ObFileSqlColumn &col,
                             common::ObIAllocator &alloc, common::ObObj &obj);
 
+// The DESCRIBE of a file table answers with the schema of the file instead of the plan of the
+// query. The explain resolver turns this on while it resolves the statement it describes, the
+// file table turns it into the schema rows, and the explain resolver then hands the query back as
+// the statement, because a plan cannot carry six columns.
+enum ObFileSqlDescribeState
+{
+  OB_FILE_SQL_DESCRIBE_OFF = 0,
+  OB_FILE_SQL_DESCRIBE_ON = 1,
+  OB_FILE_SQL_DESCRIBE_ANSWERED = 2,
+};
+
+extern thread_local ObFileSqlDescribeState g_ob_file_sql_describe_state;
+
 // Reads a file table whole. The row source the engine can currently feed is a values table, whose
 // rows must exist at compile time, so the loader is bounded: MAX_ROWS caps what one query may
 // materialise and reports a clear error instead of exhausting memory.
@@ -227,6 +240,9 @@ private:
                        ObFileSqlTableData &data);
   static int load_jsonl(common::ObIAllocator &alloc, const ObFileSqlScanParam &param,
                         ObFileSqlTableData &data);
+  // Turns the columns of a file table into the schema rows a DESCRIBE prints.
+  static int load_describe(common::ObIAllocator &alloc, const ObFileSqlTableData &source,
+                           ObFileSqlTableData &data);
   DISALLOW_COPY_AND_ASSIGN(ObFileSqlLoader);
 };
 
