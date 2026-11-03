@@ -11315,9 +11315,24 @@ int ObDMLResolver::resolve_file_table_options(const common::ObIArray<ParseNode *
       // so any negative value is accepted and a positive one (sampling) is not implemented
       const ParseNode *value_node = (opt->num_child_ >= 1) ? opt->children_[0] : NULL;
       const int64_t sample = (OB_NOT_NULL(value_node)) ? value_node->value_ : 0;
-      const bool negative = (sample < 0)
-                            || (OB_NOT_NULL(value_node) && OB_NOT_NULL(value_node->str_value_)
-                                && value_node->str_len_ > 0 && '-' == value_node->str_value_[0]);
+      int64_t off = -1;
+      char before = ' ';
+      bool negative = false;
+      if (OB_NOT_NULL(value_node) && OB_NOT_NULL(session_info_)) {
+        // the parser folds a leading '-' into conf_const, but the node that reaches the resolver is
+        // a T_EXTEND whose value_ is not the magnitude, so the user's own text is the authority on
+        // the sign: the character in front of the literal is what separates -1 from 10
+        const ObString &sql_text = session_info_->get_current_query_string();
+        off = value_node->sql_str_off_;
+        int64_t i = off - 1;
+        while (i >= 0 && (' ' == sql_text[i] || '\t' == sql_text[i])) {
+          --i;
+        }
+        if (i >= 0) {
+          before = sql_text[i];
+          negative = ('-' == before);
+        }
+      }
       LOG_TRACE("file table sample_size argument", K(sample), K(negative),
                 "value_type", OB_ISNULL(value_node) ? -1 : static_cast<int64_t>(value_node->type_),
                 "value_str_len", OB_ISNULL(value_node) ? -1 : value_node->str_len_,
@@ -11325,7 +11340,9 @@ int ObDMLResolver::resolve_file_table_options(const common::ObIArray<ParseNode *
       if (!negative) {
         ret = OB_NOT_SUPPORTED;
         LOG_USER_ERROR(OB_NOT_SUPPORTED, "sample_size other than -1");
-        LOG_WARN("sample_size rejected", K(ret), K(opt->type_), K(sample));
+        LOG_WARN("sample_size must be -1 to mean every row", K(ret), K(sample), K(off),
+                 K(before), "value_type",
+                 OB_ISNULL(value_node) ? -1 : static_cast<int>(value_node->type_));
       }
     } else if (T_FILE_TABLE_FORMAT_NAME == opt->type_) {
       if (opt->num_child_ < 1 || OB_ISNULL(opt->children_[0])
