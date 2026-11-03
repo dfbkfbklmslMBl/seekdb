@@ -782,6 +782,7 @@ private:
   int resolve_file_table_item(const ParseNode &table_node, TableItem *&table_item);
   int build_file_table_values_item(const ObFileSqlScanParam &scan_param,
                                      TableItem *&table_item);
+  int restrict_file_table_plan_to_path(const ParseNode &table_node, const TableItem *table_item);
   int rename_file_table_columns(TableItem &table_item,
                                 const ObFileSqlTableData &data);
   int resolve_file_table_options(const common::ObIArray<ParseNode *> &opts, sql::ObFileSqlScanParam &param);

@@ -11168,6 +11168,42 @@ int ObDMLResolver::resolve_file_table_item(const ParseNode &table_node, TableIte
   } else if (FALSE_IT(table_item = new_table_item)) {
   } else if (OB_FAIL(build_file_table_values_item(scan_param, table_item))) {
     LOG_WARN("failed to build a file table row source", K(ret), K(scan_param));
+  } else if (OB_FAIL(restrict_file_table_plan_to_path(table_node, table_item))) {
+    LOG_WARN("failed to pin the file table plan to its path", K(ret), K(scan_param));
+  }
+  return ret;
+}
+
+// A file table is read while the statement is resolved, so its plan carries that file's rows. The
+// path itself is a parameter to the plan cache, which would happily serve the plan to a query naming
+// another file, so the plan records the path as a constant it may only match again.
+int ObDMLResolver::restrict_file_table_plan_to_path(const ParseNode &table_node,
+                                                    const TableItem *table_item)
+{
+  int ret = OB_SUCCESS;
+  ObDMLStmt *dml_stmt = get_stmt();
+  const ParseNode *path_node = table_item == NULL ? NULL : table_node.children_[0];
+  if (OB_ISNULL(dml_stmt) || OB_ISNULL(dml_stmt->get_query_ctx()) || OB_ISNULL(path_node)) {
+    ret = OB_ERR_UNEXPECTED;
+    LOG_WARN("missing context to constrain a file table plan", K(ret));
+  } else if (T_QUESTIONMARK != path_node->type_ || OB_ISNULL(params_.param_list_)
+             || 0 == params_.param_list_->count()) {
+    // the path is spelled literally in the statement text, so it is already part of the plan key
+  } else {
+    const int64_t param_idx = path_node->value_;
+    ObPCConstParamInfo const_param_info;
+    if (param_idx < 0 || param_idx >= params_.param_list_->count()) {
+      ret = OB_ERR_UNEXPECTED;
+      LOG_WARN("file table path has no parameter slot", K(ret), K(param_idx),
+               "params", params_.param_list_->count());
+    } else if (OB_FAIL(const_param_info.const_idx_.push_back(param_idx))) {
+      LOG_WARN("failed to record the file table path constraint", K(ret), K(param_idx));
+    } else if (OB_FAIL(const_param_info.const_params_.push_back(params_.param_list_->at(param_idx)))) {
+      LOG_WARN("failed to record the file table path value", K(ret), K(param_idx));
+    } else if (OB_FAIL(dml_stmt->get_query_ctx()->all_plan_const_param_constraints_
+                       .push_back(const_param_info))) {
+      LOG_WARN("failed to add the file table path constraint", K(ret));
+    }
   }
   return ret;
 }
