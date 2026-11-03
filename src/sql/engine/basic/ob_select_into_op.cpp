@@ -200,6 +200,11 @@ int ObSelectIntoOp::inner_get_next_row()
       && T_INTO_VARIABLES != into_type
       && OB_FAIL(create_the_only_data_writer(data_writer))) {
   }
+  if (OB_SUCC(ret) && T_FILE_TABLE_COPY == into_type && OB_NOT_NULL(data_writer)) {
+    // a COPY writes the names of the selected columns as the header of the file
+    if (OB_FAIL(write_csv_header(*static_cast<ObCsvFileWriter *>(data_writer)))) {
+    }
+  }
   while (OB_SUCC(ret) && row_count < top_limit_cnt_) {
     clear_evaluated_flag();
     if (OB_FAIL(child_->get_next_row())) {
@@ -211,7 +216,7 @@ int ObSelectIntoOp::inner_get_next_row()
       if (T_INTO_VARIABLES == into_type) {
         if (OB_FAIL(into_varlist())) {
         }
-      } else if (T_INTO_OUTFILE == into_type) {
+      } else if (T_INTO_OUTFILE == into_type || T_FILE_TABLE_COPY == into_type) {
         if (OB_FAIL(into_outfile(data_writer))) {
         }
       } else {
@@ -253,6 +258,11 @@ int ObSelectIntoOp::inner_get_next_batch(const int64_t max_row_cnt)
     if (OB_FAIL(create_the_only_data_writer(data_writer))) {
     } else if (OB_ISNULL(data_writer)) {
       ret = OB_ERR_UNEXPECTED;
+    }
+  }
+  if (OB_SUCC(ret) && T_FILE_TABLE_COPY == into_type && OB_NOT_NULL(data_writer)) {
+    // a COPY writes the names of the selected columns as the header of the file
+    if (OB_FAIL(write_csv_header(*static_cast<ObCsvFileWriter *>(data_writer)))) {
     }
   }
 
@@ -907,6 +917,10 @@ int ObSelectIntoOp::print_lob_field(const ObObj &obj,
                                     ObCsvFileWriter &data_writer)
 {
   int ret = OB_SUCCESS;
+  if (OB_FAIL(ret = write_csv_header(data_writer))) {
+    LOG_WARN("failed to write the header of a copy statement", K(ret));
+    return ret;
+  }
   if (has_enclose_) {
     OZ(write_single_char_to_file(&char_enclose_, data_writer));
   }
@@ -921,6 +935,10 @@ int ObSelectIntoOp::print_field(const ObObj &obj, ObCsvFileWriter &data_writer)
 {
   int ret = OB_SUCCESS;
   char char_n = 'N';
+  if (OB_FAIL(ret = write_csv_header(data_writer))) {
+    LOG_WARN("failed to write the header of a copy statement", K(ret));
+    return ret;
+  }
   const bool need_enclose = has_enclose_ && !obj.is_null()
                             && (!is_optional_ || obj.is_string_type() || obj.is_collection_sql_type()
                                 || obj.is_json() || obj.is_geometry() || obj.is_date()
@@ -941,6 +959,63 @@ int ObSelectIntoOp::print_field(const ObObj &obj, ObCsvFileWriter &data_writer)
     OZ(write_single_char_to_file(&char_enclose_, data_writer));
   }
   return ret;
+}
+
+// The header of the file a COPY writes: the names of the selected columns, one per field.
+int ObSelectIntoOp::write_csv_header(ObCsvFileWriter &data_writer)
+{
+  int ret = OB_SUCCESS;
+  const common::ObFixedArray<common::ObString, common::ObIAllocator> &column_names = MY_SPEC.column_names_;
+  // Only a COPY grows a header row, and it is written once: this function is reached from the
+  // row loop, the batch loop and both field printers, so the flag lives here instead of at
+  // each call site.
+  if (!MY_SPEC.write_header_ || header_written_ || 0 == column_names.count()) {
+    return OB_SUCCESS;
+  }
+  const int64_t name_count = column_names.count();
+  // Column names are identifiers, not values: they go through the plain printer that writes
+  // the separators, never through the LOB printer, whose iterator is built from the datum
+  // type of an unrelated selected expression.
+  for (int64_t i = 0; OB_SUCC(ret) && i < name_count; ++i) {
+    ObObj name_obj;
+    name_obj.set_varchar(column_names.at(i));
+    name_obj.set_collation_type(cs_type_);
+    if (OB_FAIL(ret = write_obj_to_file(name_obj, data_writer, false))) {
+      LOG_WARN("failed to write a column name into the header", K(ret));
+    } else if (i != name_count - 1
+               && OB_FAIL(ret = write_obj_to_file(field_str_, data_writer, false))) {
+      LOG_WARN("failed to write the field separator of the header", K(ret));
+    }
+  }
+  if (OB_SUCC(ret)) {
+    ret = write_obj_to_file(line_str_, data_writer, false);
+  }
+  // The header is the first thing in the file; flush it before the row loop can reset the
+  // shared buffer.
+  if (OB_SUCC(ret)) {
+    ret = data_writer.flush_shared_buf(shared_buf_);
+  }
+  if (OB_SUCC(ret)) {
+    header_written_ = true;
+  }
+
+  return ret;
+}
+// The field and line terminators of the file, as plain strings.
+const char *ObSelectIntoOp::field_terminator() const
+{
+  if (field_str_.is_string_type() && field_str_.get_varchar().length() > 0) {
+    return field_str_.get_varchar().ptr();
+  }
+  return field_str_.get_val_len() > 0 ? field_str_.get_char().ptr() : "";
+}
+
+const char *ObSelectIntoOp::line_terminator() const
+{
+  if (line_str_.is_string_type() && line_str_.get_varchar().length() > 0) {
+    return line_str_.get_varchar().ptr();
+  }
+  return line_str_.get_val_len() > 0 ? line_str_.get_char().ptr() : "";
 }
 
 int ObSelectIntoOp::into_outfile(ObExternalFileWriter *data_writer)
@@ -992,6 +1067,9 @@ int ObSelectIntoOp::into_outfile_batch_csv(const ObBatchRows &brs, ObExternalFil
   ObDatum *datum = NULL;
   ObObj obj;
   ObCsvFileWriter *csv_data_writer = NULL;
+  if (OB_FAIL(ret = write_csv_header(*static_cast<ObCsvFileWriter *>(data_writer)))) {
+    LOG_WARN("failed to write the header of a copy statement", K(ret));
+  }
   for (int64_t i = 0; OB_SUCC(ret) && i < select_exprs.count(); ++i) {
     if (OB_FAIL(select_exprs.at(i)->eval_batch(eval_ctx_, *brs.skip_, brs.size_))) {
     } else if (OB_FAIL(datum_vectors.push_back(select_exprs.at(i)->locate_expr_datumvector(eval_ctx_)))) {

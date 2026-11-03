@@ -64,6 +64,8 @@ public:
       closed_cht_(),
       is_optional_(false),
       select_exprs_(alloc),
+      write_header_(false),
+      column_names_(alloc),
       is_single_(true),
       max_file_size_(DEFAULT_MAX_FILE_SIZE),
       escaped_cht_(),
@@ -83,6 +85,10 @@ public:
   common::ObObj closed_cht_;
   bool is_optional_;
   common::ObFixedArray<ObExpr*, common::ObIAllocator> select_exprs_;
+  // a COPY writes the names of the selected columns as the header of the file
+  bool write_header_;
+  // the names of the selected columns: a COPY writes them as the header of the file
+  common::ObFixedArray<common::ObString, common::ObIAllocator> column_names_;
   bool is_single_;
   int64_t max_file_size_;
   common::ObObj escaped_cht_;
@@ -126,7 +132,8 @@ public:
       external_properties_(),
       format_type_(ObExternalFileFormat::FormatType::CSV_FORMAT),
       block_id_(0),
-      need_commit_(true)
+      need_commit_(true),
+      header_written_(false)
   {
   }
 
@@ -203,6 +210,12 @@ private:
   int into_dumpfile(ObExternalFileWriter *data_writer);
   int into_outfile(ObExternalFileWriter *data_writer);
   int into_outfile_batch_csv(const ObBatchRows &brs, ObExternalFileWriter *data_writer);
+  // the header of the file a COPY writes: the names of the selected columns
+  int write_csv_header(ObCsvFileWriter &data_writer);
+  // the field and line terminators of the file, as plain strings
+  const char *field_terminator() const;
+  const char *line_terminator() const;
+  // a COPY writes its header once, before the first row
   int extract_fisrt_wchar_from_varhcar(const ObObj &obj, int32_t &wchar);
   int print_wchar_to_buf(char *buf,
                          const int64_t buf_len,
@@ -292,6 +305,8 @@ private:
   ObExternalFileFormat::FormatType format_type_;
   uint32_t block_id_;
   bool need_commit_;
+  // a COPY writes its header once, before the first row
+  bool header_written_;
   static const int64_t SHARED_BUFFER_SIZE = 2LL * 1024 * 1024;
 
 };

@@ -3115,6 +3115,9 @@ int ObSelectResolver::resolve_into_clause(const ParseNode *node)
           if (OB_FAIL(resolve_into_outfile_without_format(node, *into_item))) {
           }
         }
+      } else if (T_FILE_TABLE_COPY == node->type_) { // copy (query) to 'file' (options)
+        if (OB_FAIL(resolve_file_table_copy(node, *into_item))) {
+        }
       } else if (T_INTO_DUMPFILE  == node->type_) { // into dumpfile
         if (is_in_set_query()) {
           ret = OB_INAPPROPRIATE_INTO;
@@ -3137,6 +3140,108 @@ int ObSelectResolver::resolve_into_clause(const ParseNode *node)
   return ret;
 }
 
+
+int ObSelectResolver::resolve_file_table_copy(const ParseNode *node, ObSelectIntoItem &into_item)
+{
+  int ret = OB_SUCCESS;
+  if (node->num_child_ != 2) {
+    ret = OB_ERR_UNEXPECTED;
+  } else if (OB_FAIL(resolve_into_const_node(node->children_[0], into_item.outfile_name_))) {
+  } else {
+    // DuckDB's CSV: the fields are separated by a comma and enclosed in double quotes. The
+    // terminator is a string, the way the engine's own file options spell it.
+    const ObCollationType collation = params_.session_info_->get_local_collation_connection();
+    into_item.field_str_.set_varchar(ObString(","));
+    into_item.field_str_.set_collation_type(collation);
+    into_item.line_str_.set_varchar(ObString("\n"));
+    into_item.line_str_.set_collation_type(collation);
+    into_item.closed_cht_.meta_.set_char();
+    into_item.closed_cht_.set_char_value("\"", 1);
+    into_item.closed_cht_.set_collation_type(collation);
+    // the escape character of the CSV format; it also tells the writer that this is a copy
+    into_item.escaped_cht_.meta_.set_char();
+    into_item.escaped_cht_.set_char_value("\"", 1);
+    into_item.escaped_cht_.set_collation_type(collation);
+    into_item.is_optional_ = true;
+    // the options of the statement: the format, the header and the engine's own file options
+    ObSEArray<ParseNode *, 8> options;
+    if (OB_FAIL(ret = flatten_copy_options(node->children_[1], 0, options))) {
+      LOG_WARN("failed to collect the options of a copy statement", K(ret));
+    } else {
+      for (int64_t i = 0; OB_SUCC(ret) && i < options.count(); ++i) {
+        const ParseNode *option = options.at(i);
+        if (OB_ISNULL(option)) {
+          ret = OB_ERR_UNEXPECTED;
+        } else if (T_FILE_TABLE_FORMAT_NAME == option->type_) {
+          // only the CSV format can be written
+          if (option->num_child_ < 1 || OB_ISNULL(option->children_[0])
+              || OB_ISNULL(option->children_[0]->str_value_)) {
+            ret = OB_INVALID_ARGUMENT;
+            LOG_USER_ERROR(OB_INVALID_ARGUMENT, "the format of a copy statement");
+          } else {
+            const ObString format(option->children_[0]->str_len_, option->children_[0]->str_value_);
+            if (0 != format.case_compare(ObString("csv"))) {
+              ret = OB_NOT_SUPPORTED;
+              LOG_USER_ERROR(OB_NOT_SUPPORTED, "this format of a copy statement");
+            }
+          }
+        } else if (T_PARSE_HEADER == option->type_) {
+          // a COPY writes the header of the result, like DuckDB does
+          if (option->num_child_ > 0 && OB_NOT_NULL(option->children_[0])
+              && OB_NOT_NULL(option->children_[0]->str_value_)) {
+            const ObString header(option->children_[0]->str_len_, option->children_[0]->str_value_);
+            if (0 != header.case_compare(ObString("true"))
+                && 0 != header.case_compare(ObString("1"))) {
+              ret = OB_NOT_SUPPORTED;
+              LOG_USER_ERROR(OB_NOT_SUPPORTED, "a copy statement without a header row");
+            }
+          }
+        } else if (T_FILE_TABLE_NULLSTR == option->type_) {
+          // the engine writes a NULL as \N; the option is accepted, but it is not honoured yet
+          if (option->num_child_ < 1 || OB_ISNULL(option->children_[0])
+              || OB_ISNULL(option->children_[0]->str_value_)) {
+            ret = OB_INVALID_ARGUMENT;
+            LOG_USER_ERROR(OB_INVALID_ARGUMENT, "the null string of a copy statement");
+          } else {
+            LOG_WARN("the null string of a copy statement is not honoured yet");
+          }
+        } else if (T_FIELD_TERMINATED_STR == option->type_
+                   || T_OPTIONALLY_CLOSED_STR == option->type_
+                   || T_CLOSED_STR == option->type_
+                   || T_ESCAPED_STR == option->type_) {
+          // the engine's own file options override the defaults
+          if (OB_FAIL(ret = resolve_into_field_node(option, into_item))) {
+          }
+        }
+      }
+    }
+  }
+  return ret;
+}
+
+// The options of a copy statement are a list; the list is walked the same way the file table
+// options are, because a merge node may hold a single option without a link around it.
+int ObSelectResolver::flatten_copy_options(const ParseNode *node, int64_t depth,
+                                          ObIArray<ParseNode *> &options)
+{
+  int ret = OB_SUCCESS;
+  if (OB_ISNULL(node)) {
+    // nothing to collect
+  } else if (depth > 8) {
+    ret = OB_INVALID_ARGUMENT;
+    LOG_USER_ERROR(OB_INVALID_ARGUMENT, "the option list of a copy statement is nested too deeply");
+  } else if (T_LINK_NODE == node->type_ || T_EXPR_LIST == node->type_) {
+    for (int64_t i = 0; OB_SUCC(ret) && i < node->num_child_; ++i) {
+      if (OB_NOT_NULL(node->children_[i])
+          && OB_FAIL(ret = flatten_copy_options(node->children_[i], depth + 1, options))) {
+        LOG_WARN("failed to flatten an option of a copy statement", K(ret), K(i));
+      }
+    }
+  } else if (OB_FAIL(ret = options.push_back(const_cast<ParseNode *>(node)))) {
+    LOG_WARN("failed to collect an option of a copy statement", K(ret), "type", node->type_);
+  }
+  return ret;
+}
 
 int ObSelectResolver::resolve_column_ref_in_all_namespace(
   const ObQualifiedName &q_name,

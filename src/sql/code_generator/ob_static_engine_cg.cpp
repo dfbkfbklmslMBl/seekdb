@@ -5460,6 +5460,7 @@ int ObStaticEngineCG::generate_spec(ObLogSelectInto &op, ObSelectIntoSpec &spec,
   } else if (OB_FAIL(spec.external_properties_.store_str(op.get_external_properties()))) {
   } else if (OB_FAIL(spec.user_vars_.init(op.get_user_vars().count()))) {
   } else if (OB_FAIL(spec.select_exprs_.init(op.get_select_exprs().count()))) {
+  } else if (OB_FAIL(spec.column_names_.init(op.get_select_exprs().count()))) {
   } else {
     ObString var;
     for (int64_t i = 0; OB_SUCC(ret) && i < op.get_user_vars().count(); ++i) {
@@ -5475,10 +5476,24 @@ int ObStaticEngineCG::generate_spec(ObLogSelectInto &op, ObSelectIntoSpec &spec,
         ret = OB_ERR_UNEXPECTED;
       } else if (OB_FAIL(generate_rt_expr(*select_expr, rt_expr))) {
       } else if (OB_FAIL(spec.select_exprs_.push_back(rt_expr))) {
+      } else {
+        // a COPY writes the names of the selected columns as the header of the file
+        ObString column_name;
+        if (T_COLUMN_REF == select_expr->get_expr_type()) {
+          const ObColumnRefRawExpr *column_ref = static_cast<const ObColumnRefRawExpr *>(select_expr);
+          if (OB_FAIL(ob_write_string(alloc, column_ref->get_column_name(), column_name))) {
+            ret = OB_ALLOCATE_MEMORY_FAILED;
+          }
+        }
+        if (OB_SUCC(ret) && OB_FAIL(spec.column_names_.push_back(column_name))) {
+          ret = OB_ALLOCATE_MEMORY_FAILED;
+        }
       }
     }
     if (OB_SUCC(ret)) {
       spec.into_type_ = op.get_into_type();
+      // a COPY writes the names of the selected columns as the header of the file
+      spec.write_header_ = (T_FILE_TABLE_COPY == op.get_into_type());
       spec.is_optional_ = op.get_is_optional();
       spec.is_single_ = op.get_is_single();
       spec.max_file_size_ = op.get_max_file_size();

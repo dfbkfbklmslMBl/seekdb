@@ -515,6 +515,7 @@ END_P SET_VAR DELIMITER
 %type <node> es_sql_opt
 %type <node> hybrid_search_expr hybrid_search_param
 %type <node> file_table_expr file_table_arg file_table_option_list file_table_option
+%type <node> copy_option_list copy_option
 %type <node> vector_similarity_expr vector_similarity_metric
 %type <node> algorithm_opt lock_opt
 %type <node> flush_privileges_stmt opt_flush_privileges_scope
@@ -560,6 +561,21 @@ opt_end_p:
 /* only preparable statement will set question mark size */
 stmt:
     select_stmt             { $$ = $1; question_mark_issue($$, result); }
+  /* DuckDB's COPY writes the result of a query into a CSV file. The engine already knows how to
+     write a file for a query, so the statement is rewritten into that form: the query stays the
+     statement, and it carries an into clause that says "this is a COPY". */
+  | COPY '(' select_stmt ')' TO STRING_VALUE '(' copy_option_list ')'
+  {
+    ParseNode *copy_node = NULL;
+    malloc_non_terminal_node(copy_node, result->malloc_pool_, T_FILE_TABLE_COPY, 2, $6, $8);
+    $$ = $3;
+    if (T_SELECT == $$->type_) {
+      $$->children_[PARSE_SELECT_INTO] = copy_node;
+    } else {
+      $$ = copy_node;
+    }
+    question_mark_issue($$, result);
+  }
   | insert_stmt             { $$ = $1; question_mark_issue($$, result); }
   | create_table_stmt       {
     $$ = $1;
@@ -17611,6 +17627,50 @@ file_table_option
 | file_table_option_list ',' file_table_option
 {
   malloc_non_terminal_node($$, result->malloc_pool_, T_LINK_NODE, 2, $1, $3);
+}
+;
+
+/* The options of a COPY: the DuckDB spellings on top of the engine's own file options. The values
+ * use conf_const so that nullstr 'NULL' and format csv are both accepted. */
+copy_option_list:
+copy_option
+{
+  $$ = $1;
+}
+| copy_option_list ',' copy_option
+{
+  malloc_non_terminal_node($$, result->malloc_pool_, T_LINK_NODE, 2, $1, $3);
+}
+;
+
+copy_option:
+FORMAT NAME_OB
+{
+  malloc_non_terminal_node($$, result->malloc_pool_, T_FILE_TABLE_FORMAT_NAME, 1, $2);
+}
+| FORMAT COMP_EQ NAME_OB
+{
+  malloc_non_terminal_node($$, result->malloc_pool_, T_FILE_TABLE_FORMAT_NAME, 1, $3);
+}
+| FORMAT conf_const
+{
+  malloc_non_terminal_node($$, result->malloc_pool_, T_FILE_TABLE_FORMAT_NAME, 1, $2);
+}
+| HEADER
+{
+  malloc_non_terminal_node($$, result->malloc_pool_, T_PARSE_HEADER, 1, NULL);
+}
+| NULLSTR conf_const
+{
+  malloc_non_terminal_node($$, result->malloc_pool_, T_FILE_TABLE_NULLSTR, 1, $2);
+}
+| NULLSTR COMP_EQ conf_const
+{
+  malloc_non_terminal_node($$, result->malloc_pool_, T_FILE_TABLE_NULLSTR, 1, $3);
+}
+| external_file_format
+{
+  $$ = $1;
 }
 ;
 

@@ -2280,6 +2280,10 @@ typedef enum ObItemType
   T_FILE_TABLE_EXPRESSION = 4921,
   T_FILE_TABLE_SAMPLE_SIZE = 4922,
   T_FILE_TABLE_FORMAT_NAME = 4923,
+  /* the COPY statement of the file-as-database task: it writes the result of a query into a
+     CSV file, so it reuses the engine's "select ... into outfile" machinery with a marker. */
+  T_FILE_TABLE_COPY = 4924,
+  T_FILE_TABLE_NULLSTR = 4925,
   T_MAX //Attention: add a new type before T_MAX
 } ObItemType;
 
