@@ -26,6 +26,7 @@
 #include <ctype.h>
 
 #include "sql/file_scan/ob_file_scan_utils.h"
+#include "sql/file_scan/ob_file_sql_parquet.h"
 #include "common/timezone/ob_time_convert.h"
 #include "common/json_type/ob_json_base.h"
 #include "common/json_type/ob_json_tree.h"
@@ -833,8 +834,10 @@ int ObFileSqlLoader::load(ObIAllocator &alloc, const ObFileSqlScanParam &param,
   } else if (OB_FILE_SQL_FMT_JSON == param.format_ || OB_FILE_SQL_FMT_JSONL == param.format_) {
     ret = load_jsonl(alloc, param, data);
   } else if (OB_FILE_SQL_FMT_PARQUET == param.format_) {
-    ret = OB_NOT_SUPPORTED;
-    LOG_USER_ERROR(OB_NOT_SUPPORTED, "reading a parquet file as a table");
+    ret = ob_file_sql_load_parquet(alloc, param, data);
+    if (OB_FAIL(ret)) {
+      LOG_WARN("failed to read the parquet table", K(ret), K(param));
+    }
   } else if (OB_FAIL(load_columns(alloc, param, data))) {
     LOG_WARN("failed to read the file table", K(ret), K(param));
   }
