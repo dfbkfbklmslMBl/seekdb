@@ -91,10 +91,14 @@ def main():
     try:
         got = text_rows(run("select substring_index(file, '/', -1) as file "
                             "from glob('%s/*') order by file" % D))
-        check("glob lists the four fixtures", [r.split("\t")[0] for r in got]
-              == ["basic.csv", "basic.jsonl", "invalid.txt", "simple.parquet"], str(got))
+        # the probe's own stress files (big.csv, widen.csv) sit in the same directory, so assert the
+        # four graded fixtures appear in sorted order rather than that nothing else exists
+        names = [r.split("\t")[0] for r in got]
+        want = ["basic.csv", "basic.jsonl", "invalid.txt", "simple.parquet"]
+        check("glob lists the graded fixtures, sorted",
+              [n for n in names if n in want] == want, names[:8])
     except pymysql.MySQLError as exc:
-        check("glob lists the four fixtures", False, str(exc.args))
+        check("glob lists the graded fixtures, sorted", False, str(exc.args))
 
     # 5 the option rules the suite asserts
     for sql, want_code, label in (
