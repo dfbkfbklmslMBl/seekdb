@@ -5485,6 +5485,25 @@ int ObStaticEngineCG::generate_spec(ObLogSelectInto &op, ObSelectIntoSpec &spec,
             ret = OB_ALLOCATE_MEMORY_FAILED;
           }
         }
+        if (OB_SUCC(ret) && column_name.empty()) {
+          // an expression that is not a column gets the label EXPLAIN would print, without the
+          // table qualification get_name() adds for column references
+          char name_buf[128] = {'\0'};
+          int64_t name_pos = 0;
+          if (OB_FAIL(select_expr->get_name(name_buf, sizeof(name_buf), name_pos))) {
+            ret = OB_SUCCESS; // a name that does not fit is not a reason to fail the query
+          } else {
+            ObString printed(name_pos, name_buf);
+            const char *dot = printed.reverse_find('.');
+            if (NULL != dot && dot + 1 < printed.ptr() + printed.length()) {
+              printed.assign_ptr(dot + 1,
+                                  static_cast<int32_t>(printed.ptr() + printed.length() - (dot + 1)));
+            }
+            if (OB_FAIL(ob_write_string(alloc, printed, column_name))) {
+              ret = OB_ALLOCATE_MEMORY_FAILED;
+            }
+          }
+        }
         if (OB_SUCC(ret) && OB_FAIL(spec.column_names_.push_back(column_name))) {
           ret = OB_ALLOCATE_MEMORY_FAILED;
         }
