@@ -370,6 +370,9 @@ END_P SET_VAR DELIMITER
         OPTIMIZER_COSTS
 
         ORGANIZATION
+
+        // file-as-database (competition task 2)
+        GLOB HEADER NULLSTR READ_CSV READ_JSON READ_NDJSON READ_PARQUET SAMPLE_SIZE
 //-----------------------------non_reserved keyword end---------------------------------------------
 %type <node> sql_stmt stmt_list stmt opt_end_p
 %type <node> select_stmt update_stmt delete_stmt
@@ -511,6 +514,7 @@ END_P SET_VAR DELIMITER
 %type <node> column_list_with_boost with_param_column_ref
 %type <node> es_sql_opt
 %type <node> hybrid_search_expr hybrid_search_param
+%type <node> file_table_expr file_table_arg file_table_option_list file_table_option
 %type <node> vector_similarity_expr vector_similarity_metric
 %type <node> algorithm_opt lock_opt
 %type <node> flush_privileges_stmt opt_flush_privileges_scope
@@ -10848,6 +10852,10 @@ tbl_name
 {
   $$ = $1;
 }
+| file_table_expr
+{
+  $$ = $1;
+}
 ;
 
 tbl_name:
@@ -17467,6 +17475,156 @@ HYBRID_SEARCH '(' literal ',' hybrid_search_param ')'
   malloc_non_terminal_node($$, result->malloc_pool_, T_HYBRID_SEARCH_EXPRESSION, 3, $3, $5, $8);
 }
 ;
+/* ------------------------------------------------------------------------- *
+ * File-as-database table functions (competition task 2, "赛题二：文件即数据库").
+ *
+ * Accepted shape:
+ *     read_csv('<path>' [, name = value ...]) [[AS] alias]
+ *     read_json / read_ndjson / read_parquet / glob  ... same shape
+ *
+ * The argument list is deliberately strict: exactly ONE positional argument
+ * (the path) and every further argument must be a "name = value" option.
+ * That is what makes the two negative cases of file_sql_basic.test:23-26
+ * resolve to two DIFFERENT mysql errnos:
+ *   select * from read_csv('a.csv', 'xml')       -> fails HERE, ER_PARSE_ERROR (1064)
+ *   select * from read_csv('a.csv', sample_size = 10)
+ *                                                -> parses fine, the resolver
+ *                                                   rejects the VALUE with
+ *                                                   OB_NOT_SUPPORTED -> 1235
+ * The keyword names are non-reserved, so "select read_csv from t" and
+ * "CREATE TABLE glob (...)" keep working: no existing SQL is broken.
+ * ------------------------------------------------------------------------- */
+
+/* children: [0]=path STRING_VALUE, [1]=options T_EXPR_LIST or NULL,
+ *           [2]=alias name node or NULL;  value_ = file function kind. */
+file_table_expr:
+READ_CSV '(' file_table_arg ')'
+{
+  malloc_non_terminal_node($$, result->malloc_pool_, T_FILE_TABLE_EXPRESSION, 3, $3->children_[0], $3->children_[1], NULL);
+  $$->value_ = 0; /* READ_CSV */
+}
+| READ_CSV '(' file_table_arg ')' relation_name
+{
+  malloc_non_terminal_node($$, result->malloc_pool_, T_FILE_TABLE_EXPRESSION, 3, $3->children_[0], $3->children_[1], $5);
+  $$->value_ = 0; /* READ_CSV */
+}
+| READ_CSV '(' file_table_arg ')' AS relation_name
+{
+  malloc_non_terminal_node($$, result->malloc_pool_, T_FILE_TABLE_EXPRESSION, 3, $3->children_[0], $3->children_[1], $6);
+  $$->value_ = 0; /* READ_CSV */
+}
+| READ_JSON '(' file_table_arg ')'
+{
+  malloc_non_terminal_node($$, result->malloc_pool_, T_FILE_TABLE_EXPRESSION, 3, $3->children_[0], $3->children_[1], NULL);
+  $$->value_ = 1; /* READ_JSON */
+}
+| READ_JSON '(' file_table_arg ')' relation_name
+{
+  malloc_non_terminal_node($$, result->malloc_pool_, T_FILE_TABLE_EXPRESSION, 3, $3->children_[0], $3->children_[1], $5);
+  $$->value_ = 1; /* READ_JSON */
+}
+| READ_JSON '(' file_table_arg ')' AS relation_name
+{
+  malloc_non_terminal_node($$, result->malloc_pool_, T_FILE_TABLE_EXPRESSION, 3, $3->children_[0], $3->children_[1], $6);
+  $$->value_ = 1; /* READ_JSON */
+}
+| READ_NDJSON '(' file_table_arg ')'
+{
+  malloc_non_terminal_node($$, result->malloc_pool_, T_FILE_TABLE_EXPRESSION, 3, $3->children_[0], $3->children_[1], NULL);
+  $$->value_ = 2; /* READ_NDJSON */
+}
+| READ_NDJSON '(' file_table_arg ')' relation_name
+{
+  malloc_non_terminal_node($$, result->malloc_pool_, T_FILE_TABLE_EXPRESSION, 3, $3->children_[0], $3->children_[1], $5);
+  $$->value_ = 2; /* READ_NDJSON */
+}
+| READ_NDJSON '(' file_table_arg ')' AS relation_name
+{
+  malloc_non_terminal_node($$, result->malloc_pool_, T_FILE_TABLE_EXPRESSION, 3, $3->children_[0], $3->children_[1], $6);
+  $$->value_ = 2; /* READ_NDJSON */
+}
+| READ_PARQUET '(' file_table_arg ')'
+{
+  malloc_non_terminal_node($$, result->malloc_pool_, T_FILE_TABLE_EXPRESSION, 3, $3->children_[0], $3->children_[1], NULL);
+  $$->value_ = 3; /* READ_PARQUET */
+}
+| READ_PARQUET '(' file_table_arg ')' relation_name
+{
+  malloc_non_terminal_node($$, result->malloc_pool_, T_FILE_TABLE_EXPRESSION, 3, $3->children_[0], $3->children_[1], $5);
+  $$->value_ = 3; /* READ_PARQUET */
+}
+| READ_PARQUET '(' file_table_arg ')' AS relation_name
+{
+  malloc_non_terminal_node($$, result->malloc_pool_, T_FILE_TABLE_EXPRESSION, 3, $3->children_[0], $3->children_[1], $6);
+  $$->value_ = 3; /* READ_PARQUET */
+}
+| GLOB '(' file_table_arg ')'
+{
+  malloc_non_terminal_node($$, result->malloc_pool_, T_FILE_TABLE_EXPRESSION, 3, $3->children_[0], $3->children_[1], NULL);
+  $$->value_ = 4; /* GLOB: discovery only, one "file" column */
+}
+| GLOB '(' file_table_arg ')' relation_name
+{
+  malloc_non_terminal_node($$, result->malloc_pool_, T_FILE_TABLE_EXPRESSION, 3, $3->children_[0], $3->children_[1], $5);
+  $$->value_ = 4; /* GLOB */
+}
+| GLOB '(' file_table_arg ')' AS relation_name
+{
+  malloc_non_terminal_node($$, result->malloc_pool_, T_FILE_TABLE_EXPRESSION, 3, $3->children_[0], $3->children_[1], $6);
+  $$->value_ = 4; /* GLOB */
+}
+;
+
+/* path plus the optional "name = value" option list */
+file_table_arg:
+STRING_VALUE
+{
+  malloc_non_terminal_node($$, result->malloc_pool_, T_LINK_NODE, 2, $1, NULL);
+}
+| STRING_VALUE ',' file_table_option_list
+{
+  ParseNode *params = NULL;
+  merge_nodes(params, result, T_EXPR_LIST, $3);
+  malloc_non_terminal_node($$, result->malloc_pool_, T_LINK_NODE, 2, $1, params);
+}
+;
+
+file_table_option_list:
+file_table_option
+{
+  $$ = $1;
+}
+| file_table_option_list ',' file_table_option
+{
+  malloc_non_terminal_node($$, result->malloc_pool_, T_LINK_NODE, 2, $1, $3);
+}
+;
+
+/* DuckDB spellings on top of the existing LOAD DATA / INTO OUTFILE option
+ * vocabulary (external_file_format already models FIELD_DELIMITER, ESCAPE,
+ * FIELD_OPTIONALLY_ENCLOSED_BY, ENCODING, COMPRESSION, PARSE_HEADER,
+ * NULL_IF_EXETERNAL, EMPTY_FIELD_AS_NULL, ...).
+ * Values use conf_const, not INTNUM, because sample_size must accept the
+ * literal -1: INTNUM alone cannot carry a minus sign (see the '-' INTNUM
+ * alternative of conf_const at sql_parser_mysql_mode.y:1118). */
+file_table_option:
+HEADER COMP_EQ conf_const
+{
+  malloc_non_terminal_node($$, result->malloc_pool_, T_PARSE_HEADER, 1, $3);
+}
+| SAMPLE_SIZE COMP_EQ conf_const
+{
+  malloc_non_terminal_node($$, result->malloc_pool_, T_FILE_TABLE_SAMPLE_SIZE, 1, $3);
+}
+| FORMAT COMP_EQ conf_const
+{
+  malloc_non_terminal_node($$, result->malloc_pool_, T_FILE_TABLE_FORMAT_NAME, 1, $3);
+}
+| external_file_format
+{
+  $$ = $1;
+}
+;
 
 hybrid_search_param:
 literal
@@ -18181,6 +18339,14 @@ ACCOUNT
 |       INCONSISTENT 
 |       INDIVIDUAL
 |       HYBRID_SEARCH
+|       GLOB
+|       HEADER
+|       NULLSTR
+|       READ_CSV
+|       READ_JSON
+|       READ_NDJSON
+|       READ_PARQUET
+|       SAMPLE_SIZE
 ;
 
 unreserved_keyword_special:

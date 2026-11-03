@@ -2719,6 +2719,12 @@ int ObDMLResolver::resolve_table(const ParseNode &parse_tree,
         }
         break;
       }
+      case T_FILE_TABLE_EXPRESSION: {
+        if (OB_FAIL(resolve_file_table_item(*table_node, table_item))) {
+          LOG_WARN("failed to resolve file table item", K(ret));
+        }
+        break;
+      }
       case T_VALUES_TABLE_EXPRESSION: {
         if (OB_FAIL(resolve_values_table_item(*table_node, table_item))) {
         }
@@ -11071,6 +11077,289 @@ int ObDMLResolver::resolve_table_dynamic_sampling_hint(const ParseNode &hint_nod
     dynamic_sampling_hint->set_qb_name(qb_name);
     dynamic_sampling_hint->set_sample_block_cnt(sample_block_cnt);
     opt_hint = dynamic_sampling_hint;
+  }
+  return ret;
+}
+
+// File-as-database table functions (read_csv / read_json / read_ndjson / read_parquet / glob).
+//
+// Layer 1 of the feature: everything a query must satisfy before any row is read. The row source
+// (a dedicated access operator, mirroring how JSON_TABLE carries its own definition) is added on
+// top of this; until then the resolved-but-not-yet-scannable state reports OB_NOT_SUPPORTED
+// instead of pretending the read succeeded.
+// Collect the option nodes of a file table call, whatever shape the parser left them in.
+static int flatten_file_table_options(const ParseNode *node, int64_t depth,
+                                      common::ObIArray<ParseNode *> &options)
+{
+  int ret = OB_SUCCESS;
+  if (OB_ISNULL(node)) {
+    // nothing to collect
+  } else if (depth > 8) {
+    ret = OB_INVALID_ARGUMENT;
+    LOG_USER_ERROR(OB_INVALID_ARGUMENT, "file table, the option list is nested too deeply");
+  } else if (T_LINK_NODE == node->type_ || T_EXPR_LIST == node->type_) {
+    for (int64_t i = 0; OB_SUCC(ret) && i < node->num_child_; ++i) {
+      if (OB_NOT_NULL(node->children_[i])
+          && OB_FAIL(flatten_file_table_options(node->children_[i], depth + 1, options))) {
+        LOG_WARN("failed to flatten a file table option", K(ret), K(i), K(depth));
+      }
+    }
+  } else if (OB_FAIL(options.push_back(const_cast<ParseNode *>(node)))) {
+    LOG_WARN("failed to collect a file table option", K(ret), "type", node->type_);
+  }
+  return ret;
+}
+
+int ObDMLResolver::resolve_file_table_item(const ParseNode &table_node, TableItem *&table_item)
+{
+  int ret = OB_SUCCESS;
+  int64_t enabled_var = 0;
+  ObString secure_file_priv;
+  ObFileSqlScanParam scan_param;
+  common::ObSEArray<ParseNode *, 8> options;
+  ObDMLStmt *dml_stmt = get_stmt();
+  TableItem *new_table_item = NULL;
+  // table_item arrives NULL: resolve_table() hands the case an unallocated slot, exactly like the
+  // VALUES/JSON_TABLE/UNNEST cases below, each of which calls create_table_item() itself.
+  if (OB_ISNULL(params_.session_info_) || OB_ISNULL(dml_stmt) || OB_ISNULL(allocator_)) {
+    ret = OB_ERR_UNEXPECTED;
+    LOG_WARN("unexpected null", K(ret), K(params_.session_info_), K(dml_stmt), K(allocator_));
+  } else if (OB_FAIL(params_.session_info_->get_sys_variable(
+                 share::SYS_VAR_ENABLE_FILE_SQL, enabled_var))) {
+    LOG_WARN("failed to read enable_file_sql", K(ret));
+  } else if (0 == enabled_var) {
+    ret = OB_NOT_SUPPORTED;
+    LOG_USER_ERROR(OB_NOT_SUPPORTED, "file table function requires enable_file_sql");
+    LOG_WARN("enable_file_sql is off", K(ret));
+  } else if (table_node.num_child_ < 1 || OB_ISNULL(table_node.children_[0])
+             || OB_ISNULL(table_node.children_[0]->str_value_)
+             || table_node.children_[0]->str_len_ <= 0) {
+    ret = OB_INVALID_ARGUMENT;
+    LOG_USER_ERROR(OB_INVALID_ARGUMENT);
+    LOG_WARN("file table function needs a string path", K(ret), K(table_node.num_child_));
+  } else {
+    scan_param.path_.assign_ptr(const_cast<char *>(table_node.children_[0]->str_value_),
+                               table_node.children_[0]->str_len_);
+    scan_param.format_ = static_cast<ObFileSqlFormat>(table_node.value_);
+    // GLOB only discovers files: one "file" column, no schema inference over contents.
+    if (OB_FILE_SQL_FMT_GLOB != scan_param.format_) {
+      scan_param.full_infer_ = true;
+    }
+    // merge_nodes() wraps a list of options but leaves a single option unwrapped, so the option
+    // nodes are collected by flattening any link/list container instead of assuming one chain
+    // shape. The depth bound keeps a malformed list from recursing without end.
+    if (table_node.num_child_ >= 2 && OB_NOT_NULL(table_node.children_[1])
+        && OB_FAIL(flatten_file_table_options(table_node.children_[1], 0, options))) {
+      LOG_WARN("failed to collect the file table options", K(ret), K(table_node.num_child_));
+    }
+  }
+  if (OB_FAIL(ret)) {
+  } else if (params_.session_info_->is_inner()) {
+    // background sessions keep their own privilege model, same exception as LOAD DATA
+  } else if (OB_FAIL(params_.session_info_->get_secure_file_priv(secure_file_priv))) {
+    LOG_WARN("failed to read secure_file_priv", K(ret));
+  } else if (OB_FAIL(ObResolverUtils::check_secure_path(secure_file_priv, scan_param.path_))) {
+    LOG_WARN("path rejected by secure_file_priv", K(ret), K(secure_file_priv));
+  } else if (OB_FAIL(resolve_file_table_options(options, scan_param))) {
+    LOG_WARN("failed to validate file table options", K(ret));
+  } else if (OB_ISNULL(new_table_item = dml_stmt->create_table_item(*allocator_))) {
+    ret = OB_ALLOCATE_MEMORY_FAILED;
+    LOG_WARN("failed to create table item", K(ret));
+  } else if (FALSE_IT(table_item = new_table_item)) {
+  } else if (OB_FAIL(build_file_table_values_item(scan_param, table_item))) {
+    LOG_WARN("failed to build a file table row source", K(ret), K(scan_param));
+  }
+  return ret;
+}
+
+// The row source a file table feeds is the engine's own values table: its rows are known once the
+// file has been read during resolution, it already streams through the standard operator, and its
+// columns can be named and typed exactly as the file's header and inferred types say.
+int ObDMLResolver::build_file_table_values_item(const ObFileSqlScanParam &scan_param,
+                                                TableItem *&table_item)
+{
+  int ret = OB_SUCCESS;
+  ObDMLStmt *dml_stmt = get_stmt();
+  TableItem *new_table_item = NULL;
+  ObFileSqlTableData data;
+  common::ObArenaAllocator file_alloc(ObModIds::OB_SQL_COMPILE);
+  if (OB_ISNULL(dml_stmt) || OB_ISNULL(allocator_) || OB_ISNULL(params_.expr_factory_)
+      || OB_ISNULL(session_info_)) {
+    ret = OB_ERR_UNEXPECTED;
+    LOG_WARN("missing resolver context for a file table", K(ret));
+  } else if (OB_FAIL(ObFileSqlLoader::load(file_alloc, scan_param, data))) {
+    LOG_WARN("failed to read the file table", K(ret), K(scan_param));
+  } else if (OB_ISNULL(new_table_item = dml_stmt->create_table_item(*allocator_))) {
+    ret = OB_ALLOCATE_MEMORY_FAILED;
+  } else {
+    void *buf = NULL;
+    ObValuesTableDef *table_def = NULL;
+    if (OB_ISNULL(buf = allocator_->alloc(sizeof(ObValuesTableDef)))) {
+      ret = OB_ALLOCATE_MEMORY_FAILED;
+    } else if (FALSE_IT(table_def = new (buf) ObValuesTableDef())) {
+    } else {
+      table_def->column_cnt_ = data.col_cnt_;
+      table_def->row_cnt_ = data.row_cnt_;
+      table_def->access_type_ = ObValuesTableDef::ACCESS_EXPR;
+      table_def->is_const_ = false;
+      new_table_item->values_table_def_ = table_def;
+      new_table_item->table_id_ = generate_table_id();
+      new_table_item->type_ = TableItem::VALUES_TABLE;
+      new_table_item->is_view_table_ = false;
+      if (OB_FAIL(dml_stmt->generate_values_table_name(*allocator_, new_table_item->table_name_))) {
+        LOG_WARN("failed to name the file table", K(ret));
+      } else if (FALSE_IT(new_table_item->alias_name_ = new_table_item->table_name_)) {
+      } else if (OB_FAIL(dml_stmt->add_table_item(session_info_, new_table_item))) {
+        LOG_WARN("failed to add the file table", K(ret));
+      }
+      // one column type per column, taken from the whole file rather than from its first row
+      for (int64_t c = 0; OB_SUCC(ret) && c < data.col_cnt_; ++c) {
+        const ObFileSqlColumn &col = data.cols_.at(c);
+        ObRawExprResType res_type;
+        res_type.set_type(col.type_);
+        if (ObVarcharType == col.type_) {
+          res_type.set_collation_type(CS_TYPE_UTF8MB4_GENERAL_CI);
+          res_type.set_collation_level(CS_LEVEL_IMPLICIT);
+          res_type.set_length(static_cast<int32_t>((col.max_len_ > 1) ? col.max_len_ : 1));
+        } else {
+          res_type.set_collation_type(CS_TYPE_BINARY);
+          res_type.set_collation_level(CS_LEVEL_IGNORABLE);
+        }
+        if (OB_FAIL(table_def->column_types_.push_back(res_type))) {
+          LOG_WARN("failed to record a file column type", K(ret), K(c), K(col));
+        } else if (OB_FAIL(table_def->column_ndvs_.push_back(data.row_cnt_))) {
+          LOG_WARN("failed to record column statistics", K(ret), K(c));
+        } else if (OB_FAIL(table_def->column_nnvs_.push_back(col.nullable_ ? 1 : 0))) {
+          LOG_WARN("failed to record column statistics", K(ret), K(c));
+        }
+      }
+      for (int64_t r = 0; OB_SUCC(ret) && r < data.row_cnt_; ++r) {
+        for (int64_t c = 0; OB_SUCC(ret) && c < data.col_cnt_; ++c) {
+          const ObString &text = data.cells_.at(r * data.col_cnt_ + c);
+          ObObj obj;
+          ObConstRawExpr *value_expr = NULL;
+          if (OB_FAIL(ob_file_sql_cell_to_obj(text, data.cols_.at(c), *allocator_, obj))) {
+            LOG_WARN("failed to convert a file field", K(ret), K(r), K(c), K(text));
+          } else if (OB_FAIL(ObRawExprUtils::build_const_obj_expr(*params_.expr_factory_,
+                                                                  obj, value_expr))) {
+            LOG_WARN("failed to build a literal for a file field", K(ret), K(r), K(c));
+          } else if (OB_ISNULL(value_expr)) {
+            ret = OB_ERR_UNEXPECTED;
+          } else if (FALSE_IT(value_expr->set_result_type(table_def->column_types_.at(c)))) {
+          } else if (OB_FAIL(table_def->access_exprs_.push_back(value_expr))) {
+            LOG_WARN("failed to collect a file row", K(ret), K(r), K(c));
+          }
+        }
+      }
+      if (OB_FAIL(ret)) {
+      } else if (OB_FAIL(gen_values_table_column_items(table_def->column_cnt_,
+                                                       table_def->column_types_,
+                                                       *new_table_item))) {
+        LOG_WARN("failed to build the file table columns", K(ret), K(data));
+      } else if (OB_FAIL(rename_file_table_columns(*new_table_item, data))) {
+        LOG_WARN("failed to name the file table columns", K(ret), K(data));
+      } else {
+        table_item = new_table_item;
+        LOG_TRACE("file table materialised", K(data), K(scan_param));
+      }
+    }
+  }
+  return ret;
+}
+
+// gen_values_table_column_items names the columns column_0, column_1, ... for MySQL compatibility;
+// a file table has real headers, so the names are replaced before any column reference is built.
+int ObDMLResolver::rename_file_table_columns(TableItem &table_item, const ObFileSqlTableData &data)
+{
+  int ret = OB_SUCCESS;
+  ObDMLStmt *dml_stmt = get_stmt();
+  if (OB_ISNULL(dml_stmt) || OB_ISNULL(allocator_)) {
+    ret = OB_ERR_UNEXPECTED;
+  } else {
+    for (int64_t i = 0; OB_SUCC(ret) && i < data.col_cnt_; ++i) {
+      ColumnItem *column_item = dml_stmt->get_column_item_by_id(table_item.table_id_,
+                                                               OB_APP_MIN_COLUMN_ID + i);
+      ObString copied;
+      if (OB_ISNULL(column_item) || OB_ISNULL(column_item->expr_)) {
+        ret = OB_ERR_UNEXPECTED;
+        LOG_WARN("missing column item of a file table", K(ret), K(i));
+      } else if (OB_FAIL(ob_write_string(*allocator_, data.cols_.at(i).name_, copied, true))) {
+        LOG_WARN("failed to copy a column name", K(ret), K(i));
+      } else {
+        column_item->column_name_ = copied;
+        ObColumnRefRawExpr *column_expr = static_cast<ObColumnRefRawExpr *>(column_item->expr_);
+        column_expr->set_column_attr(table_item.table_name_, copied);
+      }
+    }
+  }
+  return ret;
+}
+
+int ObDMLResolver::resolve_file_table_options(const common::ObIArray<ParseNode *> &opts,
+                                              ObFileSqlScanParam &param)
+{
+  int ret = OB_SUCCESS;
+  for (int64_t i = 0; OB_SUCC(ret) && i < opts.count(); ++i) {
+    const ParseNode *opt = opts.at(i);
+    if (OB_ISNULL(opt)) {
+      ret = OB_ERR_UNEXPECTED;
+    } else if (T_PARSE_HEADER == opt->type_) {
+      if (opt->num_child_ < 1 || OB_ISNULL(opt->children_[0])) {
+        ret = OB_INVALID_ARGUMENT;
+        LOG_USER_ERROR(OB_INVALID_ARGUMENT);
+      } else {
+        param.header_ = (0 != opt->children_[0]->value_);
+      }
+    } else if (T_FILE_TABLE_SAMPLE_SIZE == opt->type_) {
+      // sample_size = -1 means "look at every row", which is exactly what full-file inference does,
+      // so any negative value is accepted and a positive one (sampling) is not implemented
+      const ParseNode *value_node = (opt->num_child_ >= 1) ? opt->children_[0] : NULL;
+      const int64_t sample = (OB_NOT_NULL(value_node)) ? value_node->value_ : 0;
+      const bool negative = (sample < 0)
+                            || (OB_NOT_NULL(value_node) && OB_NOT_NULL(value_node->str_value_)
+                                && value_node->str_len_ > 0 && '-' == value_node->str_value_[0]);
+      LOG_TRACE("file table sample_size argument", K(sample), K(negative),
+                "value_type", OB_ISNULL(value_node) ? -1 : static_cast<int64_t>(value_node->type_),
+                "value_str_len", OB_ISNULL(value_node) ? -1 : value_node->str_len_,
+                "value_children", OB_ISNULL(value_node) ? -1 : value_node->num_child_);
+      if (!negative) {
+        ret = OB_NOT_SUPPORTED;
+        LOG_USER_ERROR(OB_NOT_SUPPORTED, "sample_size other than -1");
+        LOG_WARN("sample_size rejected", K(ret), K(opt->type_), K(sample));
+      }
+    } else if (T_FILE_TABLE_FORMAT_NAME == opt->type_) {
+      if (opt->num_child_ < 1 || OB_ISNULL(opt->children_[0])
+          || OB_ISNULL(opt->children_[0]->str_value_)) {
+        ret = OB_INVALID_ARGUMENT;
+        LOG_USER_ERROR(OB_INVALID_ARGUMENT);
+      } else {
+        const ObString fmt(opt->children_[0]->str_len_, opt->children_[0]->str_value_);
+        // read_json's format option is what picks the layout, and the suite asks for
+        // format = 'newline_delimited': one JSON object per line
+        if (OB_FILE_SQL_FMT_JSON == param.format_
+            && (0 == fmt.case_compare("newline_delimited") || 0 == fmt.case_compare("ndjson")
+                || 0 == fmt.case_compare("jsonl") || 0 == fmt.case_compare("lines"))) {
+          param.format_ = OB_FILE_SQL_FMT_JSONL;
+        }
+        const bool ok = ((OB_FILE_SQL_FMT_JSONL == param.format_ || OB_FILE_SQL_FMT_CSV == param.format_
+                          || OB_FILE_SQL_FMT_JSON == param.format_)
+                         && (0 == fmt.case_compare("csv") || 0 == fmt.case_compare("csvheader")
+                             || 0 == fmt.case_compare("newline_delimited")
+                             || 0 == fmt.case_compare("json")
+                             || 0 == fmt.case_compare("jsonl") || 0 == fmt.case_compare("ndjson")))
+                        || (OB_FILE_SQL_FMT_PARQUET == param.format_
+                            && 0 == fmt.case_compare("parquet"));
+        if (!ok) {
+          ret = OB_NOT_SUPPORTED;
+          LOG_USER_ERROR(OB_NOT_SUPPORTED, "format value for this read_* function");
+          LOG_WARN("format rejected", K(ret), K(fmt), K(param));
+        }
+      }
+    } else {
+      ret = OB_NOT_SUPPORTED;
+      LOG_USER_ERROR(OB_NOT_SUPPORTED, "this file table option");
+      LOG_WARN("unsupported option node", K(ret), "type", opt->type_);
+    }
   }
   return ret;
 }
