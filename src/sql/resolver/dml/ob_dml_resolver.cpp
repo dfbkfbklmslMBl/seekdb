@@ -11170,6 +11170,15 @@ int ObDMLResolver::resolve_file_table_item(const ParseNode &table_node, TableIte
     LOG_WARN("failed to build a file table row source", K(ret), K(scan_param));
   } else if (OB_FAIL(restrict_file_table_plan_to_path(table_node, table_item))) {
     LOG_WARN("failed to pin the file table plan to its path", K(ret), K(scan_param));
+  } else if (OB_NOT_NULL(table_item) && 3 <= table_node.num_child_
+             && OB_NOT_NULL(table_node.children_[2])
+             && OB_NOT_NULL(table_node.children_[2]->str_value_)
+             && table_node.children_[2]->str_len_ > 0) {
+    // the file table node carries the alias the user wrote (`read_csv('p') f`) as its third child,
+    // so the generic alias handling never sees it; without this a qualified reference such as
+    // `f.id` cannot be resolved against the table
+    table_item->alias_name_.assign_ptr(table_node.children_[2]->str_value_,
+                                       table_node.children_[2]->str_len_);
   }
   return ret;
 }
