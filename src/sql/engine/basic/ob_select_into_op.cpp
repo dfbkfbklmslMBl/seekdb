@@ -282,7 +282,7 @@ int ObSelectIntoOp::inner_get_next_batch(const int64_t max_row_cnt)
       if (brs_.size_ > 0) {
         brs_.skip_->deep_copy(*(child_brs->skip_), brs_.size_);
         row_count += brs_.size_ - brs_.skip_->accumulate_bit_cnt(brs_.size_);
-        if (T_INTO_OUTFILE == into_type) {
+        if (T_INTO_OUTFILE == into_type || T_FILE_TABLE_COPY == into_type) {
           if (ObExternalFileFormat::FormatType::CSV_FORMAT == format_type_) {
             if (OB_FAIL(into_outfile_batch_csv(brs_, data_writer))) {
             }
@@ -965,15 +965,55 @@ int ObSelectIntoOp::print_field(const ObObj &obj, ObCsvFileWriter &data_writer)
 int ObSelectIntoOp::write_csv_header(ObCsvFileWriter &data_writer)
 {
   int ret = OB_SUCCESS;
-  UNUSED(data_writer);
-  // `copy (query) to 'file' (format csv, header)` should open the file with the names of the
-  // selected columns, the way DuckDB writes a header row. The names do arrive here: the code
-  // generator puts them in MY_SPEC.column_names_ and they were measured non-empty. What is
-  // missing is the writer's buffer protocol: a line written before the first row is either
-  // overwritten by that row (the row path starts at byte 0) or leaves the file closed and
-  // re-opened, which then fails the statement with OB_INIT_TWICE. Both were measured.
-  // Until that is settled in one pass, a COPY writes the rows and no header -- an accepted
-  // option that is not honoured yet, rather than a statement that errors.
+  if (header_written_) {
+    // a COPY writes its header once, before the first row
+  } else if (!MY_SPEC.write_header_) {
+    header_written_ = true;
+  } else {
+    // The header row is written through the writer's own buffer path (byte by byte), so it goes
+    // ahead of the first data row instead of being overwritten by it, and the writer opens the
+    // file exactly once, lazily, when the header is flushed.
+    const ObIArray<ObString> &names = MY_SPEC.column_names_;
+    for (int64_t i = 0; OB_SUCC(ret) && i < names.count(); ++i) {
+      const ObString &name = names.at(i);
+      for (int64_t k = 0; OB_SUCC(ret) && k < name.length(); ++k) {
+        if (OB_FAIL(write_single_char_to_file(name.ptr() + k, data_writer))) {
+          LOG_WARN("failed to write a header field", K(ret), K(i));
+        }
+      }
+      if (OB_SUCC(ret) && i + 1 < names.count()) {
+        const char *field = field_terminator();
+        for (int64_t k = 0; OB_SUCC(ret) && NULL != field && '\0' != field[k]; ++k) {
+          if (OB_FAIL(write_single_char_to_file(field + k, data_writer))) {
+            LOG_WARN("failed to write the header field terminator", K(ret), K(i));
+          }
+        }
+      }
+    }
+    if (OB_SUCC(ret)) {
+      const char *line = line_terminator();
+      for (int64_t k = 0; OB_SUCC(ret) && NULL != line && '\0' != line[k]; ++k) {
+        if (OB_FAIL(write_single_char_to_file(line + k, data_writer))) {
+          LOG_WARN("failed to write the header line terminator", K(ret));
+        }
+      }
+    }
+    if (OB_SUCC(ret)) {
+      // the header is a complete line: persist it now so the rows append after it
+      data_writer.update_last_line_pos();
+      data_writer.reset_curr_line_len();
+      if (use_shared_buf_) {
+        if (OB_FAIL(data_writer.flush_shared_buf(shared_buf_))) {
+          LOG_WARN("failed to flush the header of a copy statement", K(ret));
+        }
+      } else if (OB_FAIL(data_writer.flush_buf())) {
+        LOG_WARN("failed to flush the header of a copy statement", K(ret));
+      }
+    }
+    if (OB_SUCC(ret)) {
+      header_written_ = true;
+    }
+  }
   return ret;
 }
 
